@@ -788,7 +788,24 @@ const api = {
 
 function connectSocket(){
   // Loaded from https://cdn.socket.io in the <head> — see script tag below
-  socket = io(API_BASE, { auth: { token: state.token } });
+  socket = io(API_BASE, {
+    auth: { token: state.token },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+  });
+
+  socket.on('connect', () => {
+    console.log('[nine] socket connected', socket.id);
+  });
+  socket.on('connect_error', (err) => {
+    console.error('[nine] socket connect_error:', err.message);
+    toast('Live connection failed: ' + err.message);
+  });
+  socket.on('disconnect', (reason) => {
+    console.warn('[nine] socket disconnected:', reason);
+  });
 
   socket.on('receive_message', (msg)=>{
     const otherId = msg.sender_id === state.currentUser.id ? msg.receiver_id : msg.sender_id;
