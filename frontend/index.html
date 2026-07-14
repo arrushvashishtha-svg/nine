@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nine · private messaging by number</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root{
+    --bg:#14151a;
+    --panel:#1b1c24;
+    --panel-2:#20222c;
+    --border:#2a2c38;
+    --text:#e8e6e1;
+    --text-dim:#8b8d9a;
+    --text-faint:#5b5d6b;
+    --accent:#f2a154;
+    --accent-dim:#7a5a34;
+    --online:#7de3c0;
+    --danger:#e8637a;
+    --radius:10px;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'Inter', sans-serif;
+    --font-mono:'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    height:100vh;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit; cursor:pointer; border:none; background:none; color:inherit;}
+  input{font-family:inherit;}
+  ::selection{background:var(--accent-dim); color:var(--text);}
+
+  /* ---------- App shell ---------- */
+  #app{height:100vh; width:100vw;}
+  .screen{height:100%; width:100%; display:none;}
+  .screen.active{display:flex;}
+
+  /* ---------- Auth screen ---------- */
+  #auth-screen{
+    align-items:center;
+    justify-content:center;
+    background:
+      radial-gradient(circle at 20% 15%, rgba(242,161,84,0.06), transparent 40%),
+      radial-gradient(circle at 85% 80%, rgba(125,227,192,0.05), transparent 40%),
+      var(--bg);
+  }
+  .auth-box{
+    width:380px;
+    max-width:90vw;
+  }
+  .auth-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--text-faint);
+    letter-spacing:0.08em;
+    margin-bottom:28px;
+  }
+  .auth-badge .dot{
+    width:6px; height:6px; border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 0 8px var(--accent);
+  }
+  .auth-title{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:34px;
+    letter-spacing:-0.02em;
+    margin-bottom:10px;
+  }
+  .auth-title span{color:var(--accent);}
+  .auth-sub{
+    color:var(--text-dim);
+    font-size:14.5px;
+    line-height:1.5;
+    margin-bottom:32px;
+  }
+  .field{margin-bottom:16px;}
+  .field label{
+    display:block;
+    font-size:12px;
+    color:var(--text-dim);
+    margin-bottom:7px;
+    letter-spacing:0.02em;
+  }
+  .field input{
+    width:100%;
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:12px 14px;
+    color:var(--text);
+    font-size:14.5px;
+    transition:border-color .15s ease;
+  }
+  .field input:focus{outline:none; border-color:var(--accent-dim);}
+  .field input::placeholder{color:var(--text-faint);}
+
+  .btn-primary{
+    width:100%;
+    background:var(--accent);
+    color:#1a1206;
+    font-weight:600;
+    font-size:14.5px;
+    padding:13px;
+    border-radius:var(--radius);
+    margin-top:6px;
+    transition:filter .15s ease, transform .1s ease;
+  }
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-primary:active{transform:scale(0.98);}
+
+  .auth-switch{
+    text-align:center;
+    margin-top:22px;
+    font-size:13.5px;
+    color:var(--text-dim);
+  }
+  .auth-switch button{color:var(--accent); font-weight:600;}
+
+  .auth-error{
+    background:rgba(232,99,122,0.1);
+    border:1px solid rgba(232,99,122,0.3);
+    color:var(--danger);
+    font-size:13px;
+    padding:10px 12px;
+    border-radius:8px;
+    margin-bottom:16px;
+    display:none;
+  }
+  .auth-error.show{display:block;}
+
+  /* ---------- Onboarding / your ID reveal ---------- */
+  #onboard-screen{align-items:center; justify-content:center;}
+  .id-reveal{
+    width:400px;
+    max-width:90vw;
+    text-align:center;
+  }
+  .id-reveal .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--text-dim);
+    letter-spacing:0.1em;
+    margin-bottom:18px;
+    text-transform:uppercase;
+  }
+  .id-number{
+    font-family:var(--font-mono);
+    font-weight:600;
+    font-size:52px;
+    letter-spacing:0.06em;
+    color:var(--accent);
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:32px 20px;
+    margin-bottom:18px;
+    word-break:break-all;
+  }
+  .id-reveal p{
+    color:var(--text-dim);
+    font-size:14px;
+    line-height:1.6;
+    margin-bottom:28px;
+  }
+  .id-reveal strong{color:var(--text);}
+
+  /* ---------- Main app layout ---------- */
+  #main-screen{width:100%;}
+  .sidebar{
+    width:320px;
+    min-width:320px;
+    background:var(--panel);
+    border-right:1px solid var(--border);
+    display:flex;
+    flex-direction:column;
+  }
+  .sidebar-header{
+    padding:18px 18px 14px;
+    border-bottom:1px solid var(--border);
+  }
+  .me-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:14px;
+  }
+  .me-info{display:flex; align-items:center; gap:10px;}
+  .avatar{
+    width:36px; height:36px;
+    border-radius:50%;
+    background:linear-gradient(135deg, var(--accent), #c97c3a);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-display); font-weight:700; font-size:14px;
+    color:#1a1206;
+    flex-shrink:0;
+  }
+  .me-name{font-weight:600; font-size:14.5px;}
+  .me-id{
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--text-faint);
+  }
+  .icon-btn{
+    width:32px; height:32px;
+    border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim);
+    transition:background .15s ease, color .15s ease;
+    position:relative;
+  }
+  .icon-btn:hover{background:var(--panel-2); color:var(--text);}
+  .icon-btn svg{width:17px; height:17px;}
+  .badge-count{
+    position:absolute;
+    top:-3px; right:-3px;
+    background:var(--accent);
+    color:#1a1206;
+    font-size:9.5px;
+    font-weight:700;
+    min-width:15px;
+    height:15px;
+    border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    padding:0 3px;
+    font-family:var(--font-mono);
+  }
+
+  .privacy-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:9px 11px;
+    font-size:12.5px;
+    color:var(--text-dim);
+  }
+  .switch{
+    width:34px; height:19px;
+    border-radius:20px;
+    background:var(--border);
+    position:relative;
+    transition:background .2s ease;
+    flex-shrink:0;
+  }
+  .switch.on{background:var(--accent);}
+  .switch::after{
+    content:'';
+    position:absolute;
+    top:2px; left:2px;
+    width:15px; height:15px;
+    border-radius:50%;
+    background:var(--text);
+    transition:transform .2s ease;
+  }
+  .switch.on::after{transform:translateX(15px); background:#1a1206;}
+
+  .search-add{
+    padding:12px 18px;
+    border-bottom:1px solid var(--border);
+  }
+  .add-row{
+    display:flex;
+    gap:8px;
+  }
+  .add-row input{
+    flex:1;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:9px 11px;
+    color:var(--text);
+    font-family:var(--font-mono);
+    font-size:13px;
+  }
+  .add-row input:focus{outline:none; border-color:var(--accent-dim);}
+  .add-row input::placeholder{color:var(--text-faint); font-family:var(--font-body);}
+  .add-btn{
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    color:var(--accent);
+    font-weight:600;
+    font-size:12.5px;
+    padding:0 14px;
+    border-radius:8px;
+    white-space:nowrap;
+    transition:border-color .15s ease;
+  }
+  .add-btn:hover{border-color:var(--accent-dim);}
+  .add-feedback{
+    font-size:11.5px;
+    margin-top:8px;
+    min-height:14px;
+  }
+  .add-feedback.ok{color:var(--online);}
+  .add-feedback.err{color:var(--danger);}
+
+  .tabs{
+    display:flex;
+    border-bottom:1px solid var(--border);
+  }
+  .tab{
+    flex:1;
+    padding:11px 0;
+    text-align:center;
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--text-faint);
+    border-bottom:2px solid transparent;
+    transition:color .15s ease;
+  }
+  .tab.active{color:var(--text); border-bottom-color:var(--accent);}
+
+  .list{flex:1; overflow-y:auto;}
+  .list::-webkit-scrollbar{width:6px;}
+  .list::-webkit-scrollbar-thumb{background:var(--border); border-radius:3px;}
+
+  .friend-item{
+    display:flex;
+    align-items:center;
+    gap:11px;
+    padding:11px 18px;
+    cursor:pointer;
+    border-left:2px solid transparent;
+    transition:background .12s ease;
+  }
+  .friend-item:hover{background:var(--panel-2);}
+  .friend-item.selected{background:var(--panel-2); border-left-color:var(--accent);}
+  .friend-item .avatar{position:relative;}
+  .online-dot{
+    position:absolute;
+    bottom:-1px; right:-1px;
+    width:9px; height:9px;
+    border-radius:50%;
+    background:var(--online);
+    border:2px solid var(--panel);
+  }
+  .friend-meta{flex:1; min-width:0;}
+  .friend-name{font-size:14px; font-weight:500;}
+  .friend-preview{
+    font-size:12px;
+    color:var(--text-faint);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    margin-top:2px;
+  }
+  .friend-id-tag{
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    color:var(--text-faint);
+  }
+
+  .empty-list{
+    padding:40px 24px;
+    text-align:center;
+    color:var(--text-faint);
+    font-size:13px;
+    line-height:1.6;
+  }
+
+  /* requests */
+  .req-item{
+    padding:12px 18px;
+    border-bottom:1px solid var(--border);
+  }
+  .req-top{display:flex; align-items:center; gap:11px; margin-bottom:10px;}
+  .req-actions{display:flex; gap:8px;}
+  .req-btn{
+    flex:1;
+    padding:7px 0;
+    border-radius:7px;
+    font-size:12px;
+    font-weight:600;
+    border:1px solid var(--border);
+  }
+  .req-btn.accept{background:var(--accent); color:#1a1206; border-color:var(--accent);}
+  .req-btn.decline{color:var(--text-dim);}
+  .req-btn.decline:hover{border-color:var(--danger); color:var(--danger);}
+
+  /* ---------- Chat pane ---------- */
+  .chat-pane{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    background:var(--bg);
+  }
+  .chat-empty{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:10px;
+    color:var(--text-faint);
+  }
+  .chat-empty .id-hint{
+    font-family:var(--font-mono);
+    font-size:12px;
+    background:var(--panel);
+    border:1px solid var(--border);
+    padding:8px 14px;
+    border-radius:20px;
+  }
+  .chat-header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:14px 22px;
+    border-bottom:1px solid var(--border);
+    background:var(--panel);
+  }
+  .chat-header-name{font-family:var(--font-display); font-weight:600; font-size:15.5px;}
+  .chat-header-status{font-size:11.5px; color:var(--text-faint); margin-top:1px;}
+  .chat-header-status.online{color:var(--online);}
+
+  .messages{
+    flex:1;
+    overflow-y:auto;
+    padding:22px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .messages::-webkit-scrollbar{width:6px;}
+  .messages::-webkit-scrollbar-thumb{background:var(--border); border-radius:3px;}
+
+  .msg-row{display:flex;}
+  .msg-row.mine{justify-content:flex-end;}
+  .bubble{
+    max-width:60%;
+    padding:10px 14px;
+    border-radius:14px;
+    font-size:14px;
+    line-height:1.45;
+  }
+  .msg-row.theirs .bubble{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-bottom-left-radius:4px;
+  }
+  .msg-row.mine .bubble{
+    background:var(--accent-dim);
+    color:var(--text);
+    border-bottom-right-radius:4px;
+  }
+  .bubble .time{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    color:var(--text-faint);
+    margin-top:4px;
+    display:block;
+  }
+
+  .composer{
+    display:flex;
+    gap:10px;
+    padding:16px 22px;
+    border-top:1px solid var(--border);
+    background:var(--panel);
+  }
+  .composer input{
+    flex:1;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:22px;
+    padding:11px 18px;
+    color:var(--text);
+    font-size:14px;
+  }
+  .composer input:focus{outline:none; border-color:var(--accent-dim);}
+  .composer input::placeholder{color:var(--text-faint);}
+  .send-btn{
+    width:42px; height:42px;
+    border-radius:50%;
+    background:var(--accent);
+    color:#1a1206;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+    transition:filter .15s ease, transform .1s ease;
+  }
+  .send-btn:hover{filter:brightness(1.08);}
+  .send-btn:active{transform:scale(0.94);}
+  .send-btn svg{width:17px; height:17px;}
+
+  /* toast */
+  .toast{
+    position:fixed;
+    bottom:24px;
+    left:50%;
+    transform:translateX(-50%) translateY(20px);
+    background:var(--panel);
+    border:1px solid var(--border);
+    color:var(--text);
+    font-size:13px;
+    padding:11px 18px;
+    border-radius:10px;
+    opacity:0;
+    transition:opacity .25s ease, transform .25s ease;
+    pointer-events:none;
+    z-index:100;
+    box-shadow:0 8px 24px rgba(0,0,0,0.35);
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  @media (max-width:760px){
+    .sidebar{width:100%; min-width:0;}
+    .chat-pane{display:none;}
+    body.chat-open .sidebar{display:none;}
+    body.chat-open .chat-pane{display:flex;}
+    .back-btn{display:flex !important;}
+  }
+  .back-btn{
+    display:none;
+    width:32px; height:32px;
+    align-items:center; justify-content:center;
+    color:var(--text-dim);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ AUTH SCREEN ============ -->
+  <div class="screen active" id="auth-screen">
+    <div class="auth-box">
+      <div class="auth-badge"><span class="dot"></span> NO PHONE NUMBER REQUIRED</div>
+      <div class="auth-title">nine<span>.</span></div>
+      <div class="auth-sub" id="auth-sub">Message people by their ID number — not their phone number. Create an account to get yours.</div>
+
+      <div class="auth-error" id="auth-error"></div>
+
+      <form id="auth-form">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="input-username" placeholder="e.g. midnightfox" autocomplete="off" required>
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="input-password" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="btn-primary" id="auth-submit">Create account</button>
+      </form>
+
+      <div class="auth-switch">
+        <span id="auth-switch-text">Already have an account?</span>
+        <button id="auth-switch-btn">Log in</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ID REVEAL / ONBOARDING ============ -->
+  <div class="screen" id="onboard-screen">
+    <div class="id-reveal">
+      <div class="eyebrow">Your ID Number</div>
+      <div class="id-number" id="reveal-id">000000</div>
+      <p>This is how people add <strong>you</strong> — nobody else on Nine has this number. Share it however you like, or keep your account private so this is the <strong>only</strong> way in.</p>
+      <button class="btn-primary" id="continue-btn">Continue to Nine</button>
+    </div>
+  </div>
+
+  <!-- ============ MAIN APP ============ -->
+  <div class="screen" id="main-screen" style="display:none;">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="me-row">
+          <div class="me-info">
+            <div class="avatar" id="me-avatar">M</div>
+            <div>
+              <div class="me-name" id="me-name">username</div>
+              <div class="me-id" id="me-id-display">#000000</div>
+            </div>
+          </div>
+          <button class="icon-btn" id="logout-btn" title="Log out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+        <div class="privacy-toggle">
+          <span id="privacy-label">Public — anyone can find you by username</span>
+          <div class="switch" id="privacy-switch"></div>
+        </div>
+      </div>
+
+      <div class="search-add">
+        <div class="add-row">
+          <input type="text" id="add-id-input" placeholder="Enter their ID number…" maxlength="9" inputmode="numeric">
+          <button class="add-btn" id="add-id-btn">Send</button>
+        </div>
+        <div class="add-feedback" id="add-feedback"></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" data-tab="friends">Friends</div>
+        <div class="tab" data-tab="requests">Requests <span id="req-badge"></span></div>
+      </div>
+
+      <div class="list" id="friends-list"></div>
+      <div class="list" id="requests-list" style="display:none;"></div>
+    </div>
+
+    <div class="chat-pane" id="chat-pane">
+      <div class="chat-empty" id="chat-empty">
+        <div style="font-family:var(--font-display); font-size:16px; color:var(--text-dim);">No conversation selected</div>
+        <div class="id-hint">Add someone by their ID to start chatting</div>
+      </div>
+
+      <div id="chat-active" style="display:none; flex-direction:column; height:100%;">
+        <div class="chat-header">
+          <button class="back-btn" id="back-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div class="avatar" id="chat-avatar">A</div>
+          <div>
+            <div class="chat-header-name" id="chat-name">Name</div>
+            <div class="chat-header-status" id="chat-status">Offline</div>
+          </div>
+          <div style="margin-left:auto; display:flex; gap:8px;">
+            <button class="icon-btn" id="call-audio-btn" title="Voice call">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            </button>
+            <button class="icon-btn" id="call-video-btn" title="Video call">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="composer">
+          <input type="text" id="msg-input" placeholder="Type a message…" autocomplete="off">
+          <button class="send-btn" id="send-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Incoming call modal -->
+<div id="incoming-call-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:32px; width:320px; text-align:center;">
+    <div class="avatar" id="incoming-avatar" style="width:56px; height:56px; font-size:20px; margin:0 auto 16px;">?</div>
+    <div style="font-family:var(--font-display); font-weight:600; font-size:17px; margin-bottom:4px;" id="incoming-name">Someone</div>
+    <div style="color:var(--text-dim); font-size:13px; margin-bottom:24px;" id="incoming-type">is calling…</div>
+    <div style="display:flex; gap:10px;">
+      <button class="req-btn decline" id="incoming-decline-btn" style="flex:1; padding:11px 0;">Decline</button>
+      <button class="req-btn accept" id="incoming-accept-btn" style="flex:1; padding:11px 0;">Accept</button>
+    </div>
+  </div>
+</div>
+
+<!-- Active call overlay -->
+<div id="active-call-overlay" style="display:none; position:fixed; inset:0; background:#0a0a0d; z-index:200; flex-direction:column;">
+  <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
+    <video id="remote-video" autoplay playsinline style="max-width:100%; max-height:100%; background:#000;"></video>
+    <video id="local-video" autoplay playsinline muted style="position:absolute; bottom:20px; right:20px; width:140px; border-radius:10px; border:2px solid var(--border); background:#000;"></video>
+    <div id="call-status-label" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono);"></div>
+  </div>
+  <div style="padding:20px; display:flex; justify-content:center;">
+    <button id="hangup-btn" style="background:var(--danger); color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.33a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="call.js"></script>
+
+<script>
+/* ============================================================
+   NINE — front-end prototype
+   ------------------------------------------------------------
+   This is a self-contained demo using localStorage + in-memory
+   mock data so you can see the full flow before wiring up a
+   real backend. Replace the functions inside `api` with real
+   fetch()/socket.io calls to your server — every place your
+   backend needs to plug in is marked with // BACKEND HOOK.
+   ============================================================ */
+
+// ---------- Config ----------
+// Point this at your deployed backend, e.g. 'https://nine-backend.onrender.com'
+const API_BASE = window.NINE_API_BASE || 'http://localhost:4000';
+
+let state = {
+  currentUser: null, // {id, username, friendId, isPrivate}
+  friends: [],        // [{id, username, online, lastMsg}]
+  requests: [],        // [{id (request row id), userId, username, friendId}]
+  messages: {},        // {friendUserId: [{fromMe, text, time}]}
+  token: localStorage.getItem('nine_token') || null,
+};
+
+let socket = null;
+let call = null; // CallManager instance, created after login (see call.js)
+
+function authHeaders(){
+  return { 'Authorization': `Bearer ${state.token}`, 'Content-Type': 'application/json' };
+}
+
+async function handleRes(res){
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || 'Something went wrong');
+  return data;
+}
+
+// ---------- Real API layer ----------
+const api = {
+  async register(username, password){
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, password })
+    });
+    const data = await handleRes(res);
+    state.token = data.token;
+    localStorage.setItem('nine_token', data.token);
+    return { id:data.user.id, username:data.user.username, friendId:data.user.friendId, isPrivate:data.user.isPrivate };
+  },
+  async login(username, password){
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, password })
+    });
+    const data = await handleRes(res);
+    state.token = data.token;
+    localStorage.setItem('nine_token', data.token);
+    return { id:data.user.id, username:data.user.username, friendId:data.user.friendId, isPrivate:data.user.isPrivate };
+  },
+  async togglePrivacy(isPrivate){
+    const res = await fetch(`${API_BASE}/friends/privacy`, {
+      method:'PATCH', headers: authHeaders(), body: JSON.stringify({ isPrivate })
+    });
+    return handleRes(res);
+  },
+  async sendFriendRequest(friendId){
+    const res = await fetch(`${API_BASE}/friends/request/${friendId}`, {
+      method:'POST', headers: authHeaders()
+    });
+    return handleRes(res);
+  },
+  async getRequests(){
+    const res = await fetch(`${API_BASE}/friends/requests`, { headers: authHeaders() });
+    return handleRes(res);
+  },
+  async acceptRequest(requestRowId){
+    const res = await fetch(`${API_BASE}/friends/requests/${requestRowId}/accept`, {
+      method:'POST', headers: authHeaders()
+    });
+    return handleRes(res);
+  },
+  async declineRequest(requestRowId){
+    const res = await fetch(`${API_BASE}/friends/requests/${requestRowId}/decline`, {
+      method:'POST', headers: authHeaders()
+    });
+    return handleRes(res);
+  },
+  async getFriends(){
+    const res = await fetch(`${API_BASE}/friends`, { headers: authHeaders() });
+    return handleRes(res);
+  },
+  async getHistory(friendUserId){
+    const res = await fetch(`${API_BASE}/messages/${friendUserId}`, { headers: authHeaders() });
+    return handleRes(res);
+  },
+  sendMessage(friendUserId, text){
+    // Real-time send over the socket, not HTTP — see connectSocket()
+    return new Promise((resolve, reject)=>{
+      if(!socket) return reject(new Error('Not connected'));
+      socket.emit('send_message', { toUserId: friendUserId, text }, (res)=>{
+        if(res?.error) reject(new Error(res.error));
+        else resolve(res.message);
+      });
+    });
+  }
+};
+
+function connectSocket(){
+  // Loaded from https://cdn.socket.io in the <head> — see script tag below
+  socket = io(API_BASE, { auth: { token: state.token } });
+
+  socket.on('receive_message', (msg)=>{
+    const otherId = msg.sender_id === state.currentUser.id ? msg.receiver_id : msg.sender_id;
+    if(!state.messages[otherId]) state.messages[otherId] = [];
+    state.messages[otherId].push({
+      fromMe: msg.sender_id === state.currentUser.id,
+      text: msg.content,
+      time: new Date(msg.created_at).getTime()
+    });
+    const f = state.friends.find(fr=>fr.id===String(otherId));
+    if(f) f.lastMsg = msg.content;
+    if(activeFriendId === String(otherId)) renderMessages();
+    renderFriends();
+  });
+
+  socket.on('presence', ({ userId, online })=>{
+    const f = state.friends.find(fr=>fr.id===String(userId));
+    if(f){ f.online = online; renderFriends(); if(activeFriendId===String(userId)) updateChatHeaderStatus(f); }
+  });
+
+  socket.on('friend_request', async (req)=>{
+    // Refetch so we get the real request row id needed to accept/decline
+    try{
+      const data = await api.getRequests();
+      state.requests = data.requests.map(r=>({
+        id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id
+      }));
+      renderRequests();
+    }catch(e){ /* ignore, will show on next refresh */ }
+    toast(`${req.username} sent you a friend request`);
+  });
+
+  // Call events are wired by CallManager (call.js) once instantiated — see enterApp()
+  if(window.CallManager){
+    call = new window.CallManager(socket);
+    wireCallUI();
+  }
+}
+
+// ---------- UI helpers ----------
+const $ = sel => document.querySelector(sel);
+const $$ = sel => document.querySelectorAll(sel);
+
+function showScreen(id){
+  $$('.screen').forEach(s=>{
+    s.style.display = 'none';
+    s.classList.remove('active');
+  });
+  const el = document.getElementById(id);
+  el.style.display = 'flex';
+  el.classList.add('active');
+}
+
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+function initials(name){ return name.trim().charAt(0).toUpperCase(); }
+
+// ---------- Auth screen logic ----------
+let authMode = 'register';
+
+$('#auth-switch-btn').addEventListener('click', ()=>{
+  authMode = authMode === 'register' ? 'login' : 'register';
+  $('#auth-submit').textContent = authMode === 'register' ? 'Create account' : 'Log in';
+  $('#auth-sub').textContent = authMode === 'register'
+    ? 'Message people by their ID number — not their phone number. Create an account to get yours.'
+    : 'Welcome back. Log in with your username and password.';
+  $('#auth-switch-text').textContent = authMode === 'register' ? 'Already have an account?' : "Don't have an account?";
+  $('#auth-switch-btn').textContent = authMode === 'register' ? 'Log in' : 'Sign up';
+  $('#auth-error').classList.remove('show');
+});
+
+$('#auth-form').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const username = $('#input-username').value.trim();
+  const password = $('#input-password').value;
+  const errEl = $('#auth-error');
+  errEl.classList.remove('show');
+  $('#auth-submit').textContent = 'Please wait…';
+
+  try{
+    let user;
+    if(authMode === 'register'){
+      user = await api.register(username, password);
+      state.currentUser = user;
+      renderMe();
+      $('#reveal-id').textContent = user.friendId;
+      showScreen('onboard-screen');
+    } else {
+      user = await api.login(username, password);
+      state.currentUser = user;
+      renderMe();
+      enterApp();
+    }
+  }catch(err){
+    errEl.textContent = err.message;
+    errEl.classList.add('show');
+  }finally{
+    $('#auth-submit').textContent = authMode === 'register' ? 'Create account' : 'Log in';
+  }
+});
+
+$('#continue-btn').addEventListener('click', enterApp);
+
+async function enterApp(){
+  showScreen('main-screen');
+  connectSocket();
+  await loadFriendsAndRequests();
+}
+
+async function loadFriendsAndRequests(){
+  try{
+    const [friendsData, requestsData] = await Promise.all([api.getFriends(), api.getRequests()]);
+    state.friends = friendsData.friends.map(f=>({
+      id: String(f.id), username: f.username, online:false, lastMsg:''
+    }));
+    state.requests = requestsData.requests.map(r=>({
+      id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id
+    }));
+    renderFriends();
+    renderRequests();
+  }catch(err){
+    toast(err.message);
+  }
+}
+
+// ---------- Render "me" info ----------
+function renderMe(){
+  const u = state.currentUser;
+  $('#me-name').textContent = u.username;
+  $('#me-id-display').textContent = '#' + u.friendId;
+  $('#me-avatar').textContent = initials(u.username);
+  const sw = $('#privacy-switch');
+  sw.classList.toggle('on', u.isPrivate);
+  $('#privacy-label').textContent = u.isPrivate
+    ? 'Private — only your ID number can add you'
+    : 'Public — anyone can find you by username';
+}
+
+$('#privacy-switch').addEventListener('click', async ()=>{
+  state.currentUser.isPrivate = !state.currentUser.isPrivate;
+  await api.togglePrivacy(state.currentUser.isPrivate);
+  renderMe();
+  toast(state.currentUser.isPrivate ? 'Account set to private' : 'Account set to public');
+});
+
+$('#logout-btn').addEventListener('click', ()=>{
+  if(socket) socket.disconnect();
+  state.currentUser = null;
+  state.token = null;
+  state.friends = [];
+  state.requests = [];
+  state.messages = {};
+  localStorage.removeItem('nine_token');
+  $('#input-username').value = '';
+  $('#input-password').value = '';
+  showScreen('auth-screen');
+});
+
+// ---------- Tabs ----------
+$$('.tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    $$('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    const which = tab.dataset.tab;
+    $('#friends-list').style.display = which === 'friends' ? 'block' : 'none';
+    $('#requests-list').style.display = which === 'requests' ? 'block' : 'none';
+  });
+});
+
+// ---------- Friends list ----------
+let activeFriendId = null;
+
+function renderFriends(){
+  const list = $('#friends-list');
+  if(state.friends.length === 0){
+    list.innerHTML = `<div class="empty-list">No friends yet.<br>Add someone using their ID number above.</div>`;
+    return;
+  }
+  list.innerHTML = state.friends.map(f=>`
+    <div class="friend-item ${f.id===activeFriendId?'selected':''}" data-id="${f.id}">
+      <div class="avatar">${initials(f.username)}${f.online?'<span class="online-dot"></span>':''}</div>
+      <div class="friend-meta">
+        <div class="friend-name">${escapeHtml(f.username)}</div>
+        <div class="friend-preview">${escapeHtml(f.lastMsg || '')}</div>
+      </div>
+      <div class="friend-id-tag">#${f.id}</div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.friend-item').forEach(el=>{
+    el.addEventListener('click', ()=> openChat(el.dataset.id));
+  });
+}
+
+function renderRequests(){
+  const list = $('#requests-list');
+  const badge = $('#req-badge');
+  badge.innerHTML = state.requests.length ? `<span class="badge-count" style="position:static; display:inline-flex; margin-left:4px;">${state.requests.length}</span>` : '';
+
+  if(state.requests.length === 0){
+    list.innerHTML = `<div class="empty-list">No pending requests.</div>`;
+    return;
+  }
+  list.innerHTML = state.requests.map(r=>`
+    <div class="req-item" data-row-id="${r.id ?? ''}" data-user-id="${r.userId}">
+      <div class="req-top">
+        <div class="avatar">${initials(r.username)}</div>
+        <div>
+          <div class="friend-name">${escapeHtml(r.username)}</div>
+          <div class="friend-id-tag">#${r.friendId}</div>
+        </div>
+      </div>
+      <div class="req-actions">
+        <button class="req-btn accept" data-action="accept">Accept</button>
+        <button class="req-btn decline" data-action="decline">Decline</button>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.req-btn').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const reqEl = btn.closest('.req-item');
+      const rowId = reqEl.dataset.rowId;
+      const userId = reqEl.dataset.userId;
+      const req = state.requests.find(r=>String(r.userId)===userId);
+      try{
+        if(btn.dataset.action === 'accept'){
+          await api.acceptRequest(rowId);
+          state.friends.push({ id:userId, username:req.username, online:false, lastMsg:'' });
+          state.messages[userId] = [];
+          toast(`You're now friends with ${req.username}`);
+        } else {
+          await api.declineRequest(rowId);
+          toast('Request declined');
+        }
+        state.requests = state.requests.filter(r=>String(r.userId)!==userId);
+        renderRequests();
+        renderFriends();
+      }catch(err){
+        toast(err.message);
+      }
+    });
+  });
+}
+
+// ---------- Add friend by ID ----------
+$('#add-id-btn').addEventListener('click', sendRequestFromInput);
+$('#add-id-input').addEventListener('keydown', e=>{ if(e.key==='Enter') sendRequestFromInput(); });
+$('#add-id-input').addEventListener('input', e=>{
+  e.target.value = e.target.value.replace(/[^0-9]/g,'').slice(0,9);
+});
+
+async function sendRequestFromInput(){
+  const input = $('#add-id-input');
+  const fb = $('#add-feedback');
+  const id = input.value.trim();
+  fb.className = 'add-feedback';
+  if(!id){ return; }
+  try{
+    const res = await api.sendFriendRequest(id);
+    fb.textContent = `Friend request sent to #${id}`;
+    fb.classList.add('ok');
+    input.value = '';
+  }catch(err){
+    fb.textContent = err.message;
+    fb.classList.add('err');
+  }
+}
+
+// ---------- Chat ----------
+async function openChat(id){
+  activeFriendId = id;
+  const f = state.friends.find(fr=>fr.id===id);
+  if(!f) return;
+
+  $('#chat-empty').style.display = 'none';
+  $('#chat-active').style.display = 'flex';
+  $('#chat-avatar').textContent = initials(f.username);
+  $('#chat-name').textContent = f.username;
+  updateChatHeaderStatus(f);
+
+  if(!state.messages[id]){
+    try{
+      const data = await api.getHistory(id);
+      state.messages[id] = data.messages.map(m=>({
+        fromMe: m.sender_id === state.currentUser.id,
+        text: m.content,
+        time: new Date(m.created_at).getTime()
+      }));
+    }catch(err){
+      state.messages[id] = [];
+      toast(err.message);
+    }
+  }
+
+  renderMessages();
+  renderFriends();
+  document.body.classList.add('chat-open');
+}
+
+function updateChatHeaderStatus(f){
+  $('#chat-status').textContent = f.online ? 'Online' : 'Offline';
+  $('#chat-status').classList.toggle('online', f.online);
+}
+
+$('#back-btn').addEventListener('click', ()=>{
+  document.body.classList.remove('chat-open');
+});
+
+function renderMessages(){
+  const box = $('#messages');
+  const msgs = state.messages[activeFriendId] || [];
+  box.innerHTML = msgs.map(m=>`
+    <div class="msg-row ${m.fromMe?'mine':'theirs'}">
+      <div class="bubble">${escapeHtml(m.text)}<span class="time">${formatTime(m.time)}</span></div>
+    </div>
+  `).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function formatTime(ts){
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+$('#send-btn').addEventListener('click', sendMsg);
+$('#msg-input').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMsg(); });
+
+async function sendMsg(){
+  const input = $('#msg-input');
+  const text = input.value.trim();
+  if(!text || !activeFriendId) return;
+  input.value = '';
+
+  try{
+    await api.sendMessage(activeFriendId, text);
+    // Our own message also arrives back via the 'receive_message' socket
+    // event (server echoes it to the sender's other tabs), but we render
+    // optimistically here so the UI feels instant:
+    if(!state.messages[activeFriendId]) state.messages[activeFriendId] = [];
+    state.messages[activeFriendId].push({ fromMe:true, text, time:Date.now() });
+    renderMessages();
+    const f = state.friends.find(fr=>fr.id===activeFriendId);
+    if(f) f.lastMsg = text;
+    renderFriends();
+  }catch(err){
+    toast(err.message);
+  }
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---------- Calling ----------
+function wireCallUI(){
+  const incomingModal = $('#incoming-call-modal');
+  const activeOverlay = $('#active-call-overlay');
+  const remoteVideo = $('#remote-video');
+  const localVideo = $('#local-video');
+  const statusLabel = $('#call-status-label');
+
+  call.onIncomingCall = (fromUserId, callType) => {
+    const f = state.friends.find(fr=>fr.id===String(fromUserId));
+    $('#incoming-avatar').textContent = f ? initials(f.username) : '?';
+    $('#incoming-name').textContent = f ? f.username : 'Someone';
+    $('#incoming-type').textContent = `Incoming ${callType} call…`;
+    incomingModal.style.display = 'flex';
+  };
+
+  $('#incoming-accept-btn').addEventListener('click', async ()=>{
+    incomingModal.style.display = 'none';
+    activeOverlay.style.display = 'flex';
+    statusLabel.textContent = 'Connecting…';
+    await call.acceptCall();
+  });
+
+  $('#incoming-decline-btn').addEventListener('click', ()=>{
+    incomingModal.style.display = 'none';
+    call.declineCall();
+  });
+
+  call.onLocalStream = (stream) => { localVideo.srcObject = stream; };
+  call.onRemoteStream = (stream) => {
+    remoteVideo.srcObject = stream;
+    statusLabel.textContent = 'Connected';
+  };
+  call.onCallEnded = () => {
+    activeOverlay.style.display = 'none';
+    incomingModal.style.display = 'none';
+    remoteVideo.srcObject = null;
+    localVideo.srcObject = null;
+  };
+  call.onCallDeclined = () => {
+    activeOverlay.style.display = 'none';
+    toast('Call declined');
+  };
+  call.onCallUnavailable = () => {
+    activeOverlay.style.display = 'none';
+    toast('They are offline right now');
+  };
+
+  $('#hangup-btn').addEventListener('click', ()=> call.hangUp());
+
+  $('#call-audio-btn').addEventListener('click', async ()=>{
+    if(!activeFriendId) return;
+    activeOverlay.style.display = 'flex';
+    statusLabel.textContent = 'Calling…';
+    await call.startCall(Number(activeFriendId), 'audio');
+  });
+
+  $('#call-video-btn').addEventListener('click', async ()=>{
+    if(!activeFriendId) return;
+    activeOverlay.style.display = 'flex';
+    statusLabel.textContent = 'Calling…';
+    await call.startCall(Number(activeFriendId), 'video');
+  });
+}
+</script>
+</body>
+</html>
