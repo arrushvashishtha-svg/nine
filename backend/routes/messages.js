@@ -31,7 +31,7 @@ router.get('/:friendUserId', async (req, res) => {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, sender_id, receiver_id, content, created_at
+    `SELECT id, sender_id, receiver_id, content, attachment_url, attachment_type, attachment_name, created_at
      FROM messages
      WHERE (sender_id = $1 AND receiver_id = $2)
         OR (sender_id = $2 AND receiver_id = $1)

@@ -1,24 +1,27 @@
 /*
-  call.js — voice/video calling using WebRTC, signaled through the
-  Socket.IO events set up in the backend's socket.js.
+  call.js — voice/video calling using Daily.co.
 
-  HOW THIS WORKS:
-  - Audio/video never touches your server. This code opens a direct
-    peer-to-peer connection between two browsers (RTCPeerConnection).
-  - Your Socket.IO server is only a messenger: it passes the "here's
-    how to reach me" info (SDP offer/answer + ICE candidates) between
-    the two browsers so they can find each other.
-  - STUN servers (below) help each browser discover its own public
-    address. That's usually enough. Some networks (strict NAT, corporate
-    firewalls, some mobile carriers) block direct peer-to-peer entirely —
-    for those you need a TURN server, which relays the actual media.
-    Free STUN is provided by Google below; TURN is NOT free at scale —
-    see the note at the bottom of this file.
+  HOW THIS WORKS NOW:
+  Daily.co handles the entire WebRTC layer for you — the peer connection,
+  TURN relay, and media all happen inside their embedded call frame
+  (an iframe they manage). You don't touch RTCPeerConnection or ICE
+  candidates at all anymore.
+
+  Flow:
+  1. Caller asks the backend to create a Daily "room" (POST /calls/room)
+  2. Caller sends the room URL to the callee via Socket.IO ('call:invite')
+  3. Callee accepts -> both sides call daily-js's join() with that URL
+  4. Daily's iframe renders the whole call UI (video tiles, mute button,
+     camera toggle, etc.) inside the container element you give it
+
+  Requires the Daily.co client library loaded on the page:
+    <script src="https://unpkg.com/@daily-co/daily-js"></script>
 
   USAGE (wire this up in your main app.js):
-    const call = new CallManager(socket);
+    const call = new CallManager(socket, API_BASE, state.token);
+    call.setContainer(document.getElementById('daily-call-container'));
     call.onIncomingCall = (fromUserId, callType) => { ...show incoming UI... };
-    call.onRemoteStream = (stream) => { remoteVideoEl.srcObject = stream; };
+    call.onCallStarted = () => { ...show call container, hide other UI... };
     call.onCallEnded = () => { ...hide call UI... };
 
     // to start a call:
@@ -33,34 +36,38 @@
 */
 
 class CallManager {
-  constructor(socket) {
+  constructor(socket, apiBase, authToken) {
     this.socket = socket;
-    this.peerConnection = null;
-    this.localStream = null;
+    this.apiBase = apiBase;
+    this.authToken = authToken;
+    this.callFrame = null;
+    this.containerEl = null;
     this.remoteUserId = null;
     this.pendingCallType = null;
+    this.pendingRoomUrl = null;
 
     // Callbacks — set these from your UI code
     this.onIncomingCall = null;   // (fromUserId, callType) => {}
-    this.onRemoteStream = null;   // (MediaStream) => {}
-    this.onLocalStream = null;    // (MediaStream) => {}
+    this.onCallStarted = null;    // () => {} — call frame is about to render, show your call container
     this.onCallEnded = null;      // () => {}
     this.onCallDeclined = null;   // () => {}
     this.onCallUnavailable = null;// () => {} — friend is offline
+    this.onCallError = null;      // (message) => {}
 
     this._bindSocketEvents();
   }
 
   _bindSocketEvents() {
-    this.socket.on('call:incoming', ({ fromUserId, callType }) => {
+    this.socket.on('call:incoming', ({ fromUserId, callType, roomUrl }) => {
       this.remoteUserId = fromUserId;
       this.pendingCallType = callType;
+      this.pendingRoomUrl = roomUrl;
       this.onIncomingCall?.(fromUserId, callType);
     });
 
-    this.socket.on('call:accepted', async ({ fromUserId }) => {
-      // We were the caller; the other side accepted. Create the offer now.
-      await this._createOfferAndSend(fromUserId);
+    this.socket.on('call:accepted', async () => {
+      // We were the caller; the other side accepted — join the room now.
+      await this._joinRoom(this.pendingRoomUrl, this.pendingCallType);
     });
 
     this.socket.on('call:declined', () => {
@@ -77,43 +84,42 @@ class CallManager {
       this._cleanup();
       this.onCallUnavailable?.();
     });
+  }
 
-    this.socket.on('call:signal', async ({ fromUserId, data }) => {
-      if (!this.peerConnection) {
-        // We're the callee receiving the first offer — set up our side now.
-        await this._setupPeerConnection(fromUserId);
-      }
-      if (data.type === 'offer') {
-        await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data));
-        const answer = await this.peerConnection.createAnswer();
-        await this.peerConnection.setLocalDescription(answer);
-        this.socket.emit('call:signal', { toUserId: fromUserId, data: answer });
-      } else if (data.type === 'answer') {
-        await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data));
-      } else if (data.candidate) {
-        try {
-          await this.peerConnection.addIceCandidate(new RTCIceCandidate(data));
-        } catch (err) {
-          console.warn('Error adding ICE candidate', err);
-        }
-      }
-    });
+  setContainer(containerEl) {
+    this.containerEl = containerEl;
   }
 
   // ---- Caller side ----
   async startCall(toUserId, callType = 'video') {
-    console.log('[nine-call] starting call to', toUserId, callType);
     this.remoteUserId = toUserId;
     this.pendingCallType = callType;
-    this.socket.emit('call:invite', { toUserId, callType });
-    // Actual offer is created once the callee accepts — see call:accepted above
+
+    try {
+      const res = await fetch(`${this.apiBase}/calls/room`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.authToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        this.onCallError?.(data.error || 'Could not start the call');
+        return;
+      }
+      this.pendingRoomUrl = data.url;
+      this.socket.emit('call:invite', { toUserId, callType, roomUrl: data.url });
+    } catch (err) {
+      console.error('[nine-call] failed to create room:', err);
+      this.onCallError?.('Could not reach the calling service');
+    }
   }
 
   // ---- Callee side ----
   async acceptCall() {
     this.socket.emit('call:accept', { toUserId: this.remoteUserId });
-    await this._setupPeerConnection(this.remoteUserId);
-    // We wait for the caller's offer to arrive via call:signal
+    await this._joinRoom(this.pendingRoomUrl, this.pendingCallType);
   }
 
   declineCall() {
@@ -130,82 +136,71 @@ class CallManager {
   }
 
   // ---- Internals ----
-  async _setupPeerConnection(remoteUserId) {
-    this.remoteUserId = remoteUserId;
-    console.log('[nine-call] setting up peer connection with', remoteUserId);
+  async _joinRoom(roomUrl, callType) {
+    if (!roomUrl) {
+      console.error('[nine-call] no room URL to join');
+      this.onCallError?.('Could not join the call — missing room link');
+      return;
+    }
+    if (!window.DailyIframe) {
+      console.error('[nine-call] Daily.co script not loaded');
+      this.onCallError?.('Calling library did not load — check your connection and try again');
+      return;
+    }
 
-    this.peerConnection = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        // Add a TURN server here for reliability across strict networks:
-        // { urls: 'turn:your-turn-server.com:3478', username: '...', credential: '...' },
-      ],
+    console.log('[nine-call] joining room', roomUrl);
+    this.onCallStarted?.();
+
+    // Give the UI a tick to show the call container before we mount into it
+    await new Promise(r => setTimeout(r, 0));
+
+    this.callFrame = window.DailyIframe.createFrame(this.containerEl, {
+      showLeaveButton: true,
+      iframeStyle: {
+        width: '100%',
+        height: '100%',
+        border: '0',
+      },
     });
 
-    this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.socket.emit('call:signal', {
-          toUserId: this.remoteUserId,
-          data: event.candidate,
-        });
-      }
-    };
-
-    this.peerConnection.oniceconnectionstatechange = () => {
-      console.log('[nine-call] ICE state:', this.peerConnection.iceConnectionState);
-    };
-
-    this.peerConnection.ontrack = (event) => {
-      console.log('[nine-call] remote track received');
-      this.onRemoteStream?.(event.streams[0]);
-    };
-
-    const constraints = this.pendingCallType === 'audio'
-      ? { audio: true, video: false }
-      : { audio: true, video: true };
+    this.callFrame.on('left-meeting', () => {
+      this.hangUp();
+    });
+    this.callFrame.on('error', (e) => {
+      console.error('[nine-call] Daily error:', e);
+      this.onCallError?.('Call connection error: ' + (e?.errorMsg || 'unknown'));
+    });
 
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      await this.callFrame.join({
+        url: roomUrl,
+        startVideoOff: callType === 'audio',
+      });
     } catch (err) {
-      console.error('[nine-call] getUserMedia failed:', err.name, err.message);
-      throw err;
+      console.error('[nine-call] join failed:', err);
+      this.onCallError?.('Could not join the call');
+      this._cleanup();
     }
-    this.onLocalStream?.(this.localStream);
-    this.localStream.getTracks().forEach(track => {
-      this.peerConnection.addTrack(track, this.localStream);
-    });
-  }
-
-  async _createOfferAndSend(toUserId) {
-    await this._setupPeerConnection(toUserId);
-    const offer = await this.peerConnection.createOffer();
-    await this.peerConnection.setLocalDescription(offer);
-    this.socket.emit('call:signal', { toUserId, data: offer });
   }
 
   _cleanup() {
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(t => t.stop());
-      this.localStream = null;
-    }
-    if (this.peerConnection) {
-      this.peerConnection.close();
-      this.peerConnection = null;
+    if (this.callFrame) {
+      try {
+        this.callFrame.destroy();
+      } catch (e) { /* already gone */ }
+      this.callFrame = null;
     }
     this.remoteUserId = null;
     this.pendingCallType = null;
+    this.pendingRoomUrl = null;
   }
 }
 
 /*
-  ABOUT TURN SERVERS (only needed once you notice calls failing to
-  connect for some pairs of users):
-  STUN (used above, free) only helps when at least one side has a
-  reachable public address. When both users are behind strict NAT/
-  firewalls, the browsers can't reach each other directly at all, and
-  you need a TURN server to relay the media through. Options:
-  - Run your own with coturn (open source) on a small VPS
-  - Use a hosted service (Twilio, Metered, Xirsys all have free/cheap tiers)
-  You only need this once real usage shows connection failures — don't
-  build it before you need it.
+  ABOUT DAILY'S FREE TIER:
+  - No card required to start
+  - Up to 5 simultaneous active rooms on the free plan (fine for a
+    personal project — rooms auto-expire 1 hour after creation, see
+    the backend's /calls/room route, so old calls don't pile up)
+  - If you outgrow this, Daily's paid tiers raise the room limit
 */

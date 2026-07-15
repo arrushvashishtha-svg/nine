@@ -61,13 +61,16 @@ function initSocket(io) {
 
     // ---------------- CHAT MESSAGES ----------------
 
-    // Client sends: socket.emit('send_message', { toUserId, text })
-    socket.on('send_message', async ({ toUserId, text }, ack) => {
+    // Client sends: socket.emit('send_message', { toUserId, text, attachment })
+    // attachment (optional): { url, type, name } from POST /uploads/attachment
+    socket.on('send_message', async ({ toUserId, text, attachment }, ack) => {
       try {
-        if (!toUserId || !text || !text.trim()) {
+        const hasText = text && text.trim();
+        const hasAttachment = attachment && attachment.url;
+        if (!toUserId || (!hasText && !hasAttachment)) {
           return ack?.({ error: 'Missing message content' });
         }
-        if (text.length > 4000) {
+        if (hasText && text.length > 4000) {
           return ack?.({ error: 'Message too long' });
         }
 
@@ -78,10 +81,16 @@ function initSocket(io) {
         }
 
         const { rows } = await pool.query(
-          `INSERT INTO messages (sender_id, receiver_id, content)
-           VALUES ($1, $2, $3)
-           RETURNING id, sender_id, receiver_id, content, created_at`,
-          [userId, toUserId, text.trim()]
+          `INSERT INTO messages (sender_id, receiver_id, content, attachment_url, attachment_type, attachment_name)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, sender_id, receiver_id, content, attachment_url, attachment_type, attachment_name, created_at`,
+          [
+            userId, toUserId,
+            hasText ? text.trim() : null,
+            hasAttachment ? attachment.url : null,
+            hasAttachment ? attachment.type : null,
+            hasAttachment ? (attachment.name || null) : null,
+          ]
         );
         const message = rows[0];
 
@@ -112,14 +121,13 @@ function initSocket(io) {
     // server.js calls io.to(...).emit('friend_request', ...) directly
     // from the HTTP route after a request is inserted — see server.js.
 
-    // ---------------- CALL SIGNALING (WebRTC) ----------------
-    // Flow: caller emits 'call:invite' -> callee gets it, shows incoming
-    // call UI -> callee emits 'call:accept' or 'call:decline' -> if
-    // accepted, both sides exchange 'call:signal' events (SDP offer/
-    // answer + ICE candidates) until the peer connection is established.
+    // ---------------- CALL SIGNALING (Daily.co rooms) ----------------
+    // Daily.co handles the actual WebRTC connection, TURN relay, and
+    // media entirely on their side. Socket.IO's only job here is to
+    // notify the other person "hey, join this room" and to let either
+    // side cancel/decline/hang up before or during the call.
 
-    socket.on('call:invite', async ({ toUserId, callType }) => {
-      // callType: 'audio' | 'video'
+    socket.on('call:invite', async ({ toUserId, callType, roomUrl }) => {
       const friends = await areFriends(userId, toUserId).catch(() => false);
       if (!friends) return;
 
@@ -129,7 +137,7 @@ function initSocket(io) {
         return;
       }
       for (const sockId of targetSockets) {
-        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType });
+        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType, roomUrl });
       }
     });
 
@@ -143,12 +151,6 @@ function initSocket(io) {
 
     socket.on('call:end', ({ toUserId }) => {
       relayToUser(io, toUserId, 'call:ended', { fromUserId: userId });
-    });
-
-    // Generic relay for SDP offers/answers and ICE candidates.
-    // payload: { toUserId, data } — `data` is whatever the WebRTC API gave you
-    socket.on('call:signal', ({ toUserId, data }) => {
-      relayToUser(io, toUserId, 'call:signal', { fromUserId: userId, data });
     });
 
     // ---------------- DISCONNECT ----------------

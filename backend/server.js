@@ -11,6 +11,8 @@ const pool = require('./db');
 const authRoutes = require('./routes/auth');
 const friendsRoutes = require('./routes/friends');
 const { router: messagesRoutes } = require('./routes/messages');
+const callsRoutes = require('./routes/calls');
+const uploadsRoutes = require('./routes/uploads');
 const { initSocket } = require('./socket');
 
 const app = express();
@@ -32,6 +34,8 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 app.use('/auth', authRoutes);
 app.use('/friends', friendsRoutes);
 app.use('/messages', messagesRoutes);
+app.use('/calls', callsRoutes);
+app.use('/uploads', uploadsRoutes);
 
 // ---- Socket.IO ----
 const io = new Server(server, {

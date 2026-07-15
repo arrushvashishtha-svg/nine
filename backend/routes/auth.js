@@ -21,6 +21,7 @@ function publicUser(row) {
     username: row.username,
     friendId: row.friend_id,
     isPrivate: row.is_private,
+    avatarUrl: row.avatar_url,
   };
 }
 
@@ -53,7 +54,7 @@ router.post('/register', async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO users (username, password_hash, friend_id, is_private)
        VALUES ($1, $2, $3, false)
-       RETURNING id, username, friend_id, is_private`,
+       RETURNING id, username, friend_id, is_private, avatar_url`,
       [username, passwordHash, friendId]
     );
 

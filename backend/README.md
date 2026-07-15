@@ -143,3 +143,42 @@ this server. That means:
 - Friend ID numbers are enforced unique at the database level
 - JWT tokens expire after 30 days; adjust in `routes/auth.js`
 - Never commit your real `.env` file — it's already in `.gitignore`
+
+## 6. New features — what you need to set up
+
+### Voice/video calling (Daily.co)
+Daily.co manages the entire call — peer connection, TURN relay, and the
+call UI itself (video tiles, mute button, camera toggle, leave button)
+all come from their embedded frame. Your backend just creates a room;
+your frontend just joins it.
+1. Sign up free at https://www.daily.co (no card required, free tier
+   includes up to 5 simultaneous rooms)
+2. Dashboard → Developers tab shows your API key
+3. On your backend service in Render → Environment, add:
+   - `DAILY_API_KEY`
+4. Redeploy. Without this key, starting a call shows a friendly
+   "calling is not configured yet" message instead of failing silently.
+
+### Profile pictures, images, video, documents in chat (Cloudinary)
+1. Sign up free at https://cloudinary.com
+2. Dashboard shows **Cloud Name**, **API Key**, **API Secret**
+3. On your backend service in Render → Environment, add:
+   - `CLOUDINARY_CLOUD_NAME`
+   - `CLOUDINARY_API_KEY`
+   - `CLOUDINARY_API_SECRET`
+4. Redeploy. Without these, avatar/file uploads return a friendly error
+   instead of failing silently.
+
+### GIF search (GIPHY)
+1. Sign up free at https://developers.giphy.com -> Create an App -> select API
+2. Copy your API key (starts as a rate-limited beta key -- fine for personal use)
+3. In frontend/index.html, find this line near the top and paste your key:
+   window.NINE_GIPHY_KEY = 'paste-your-key-here';
+4. Re-upload index.html, let the static site redeploy
+
+### Re-run the migration after pulling these updates
+The updated schema.sql adds new columns (avatar_url on users,
+attachment_url/attachment_type/attachment_name on messages). Since
+free-tier Render has no Shell access, this now runs automatically every
+time your backend boots (see runMigration() in server.js) -- just
+redeploy and check the logs for "Database schema is up to date."

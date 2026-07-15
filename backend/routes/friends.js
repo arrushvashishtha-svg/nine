@@ -92,7 +92,7 @@ router.post('/request/:friendId', async (req, res) => {
 // GET /friends/requests — incoming pending requests
 router.get('/requests', async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT fr.id, u.id AS user_id, u.username, u.friend_id
+    `SELECT fr.id, u.id AS user_id, u.username, u.friend_id, u.avatar_url
      FROM friend_requests fr
      JOIN users u ON u.id = fr.sender_id
      WHERE fr.receiver_id = $1 AND fr.status = 'pending'
@@ -155,7 +155,7 @@ router.post('/requests/:requestId/decline', async (req, res) => {
 // GET /friends — your accepted friends list
 router.get('/', async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT u.id, u.username, u.friend_id
+    `SELECT u.id, u.username, u.friend_id, u.avatar_url
      FROM friendships f
      JOIN users u ON u.id = f.friend_id
      WHERE f.user_id = $1

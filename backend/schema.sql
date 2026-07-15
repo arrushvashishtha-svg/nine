@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   friend_id VARCHAR(9) UNIQUE NOT NULL,   -- the public "add me" number, 1-9 digits
   is_private BOOLEAN NOT NULL DEFAULT false,
+  avatar_url TEXT,                        -- Cloudinary URL for profile picture
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -35,9 +36,13 @@ CREATE TABLE IF NOT EXISTS messages (
   id SERIAL PRIMARY KEY,
   sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
+  content TEXT,                            -- text content, nullable if attachment-only
+  attachment_url TEXT,                     -- Cloudinary URL, if any
+  attachment_type VARCHAR(20),             -- 'image' | 'video' | 'file' | 'gif'
+  attachment_name TEXT,                    -- original filename, for documents
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  read_at TIMESTAMPTZ
+  read_at TIMESTAMPTZ,
+  CONSTRAINT message_has_content CHECK (content IS NOT NULL OR attachment_url IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages (sender_id, receiver_id, created_at);

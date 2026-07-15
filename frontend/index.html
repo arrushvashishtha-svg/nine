@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script>window.NINE_API_BASE = 'https://nine-cjzd.onrender.com';</script>
+<script>window.NINE_GIPHY_KEY = ''; /* paste your free GIPHY API key here — see README */</script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
 <style>
   :root{
     --bg:#14151a;
@@ -44,7 +46,88 @@
   .screen{height:100%; width:100%; display:none;}
   .screen.active{display:flex;}
 
-  /* ---------- Auth screen ---------- */
+  /* ---------- Intro animation ---------- */
+  #intro-screen{
+    align-items:center;
+    justify-content:center;
+    background:var(--bg);
+    position:relative;
+    overflow:hidden;
+    cursor:pointer;
+  }
+  .intro-bg{
+    position:absolute; inset:0;
+    overflow:hidden;
+  }
+  .intro-glow{
+    position:absolute;
+    top:50%; left:50%;
+    width:600px; height:600px;
+    transform:translate(-50%,-50%);
+    background:radial-gradient(circle, rgba(242,161,84,0.10) 0%, transparent 65%);
+    animation:glowPulse 4s ease-in-out infinite;
+  }
+  @keyframes glowPulse{
+    0%,100%{ opacity:0.6; transform:translate(-50%,-50%) scale(1); }
+    50%{ opacity:1; transform:translate(-50%,-50%) scale(1.15); }
+  }
+  .intro-particles{ position:absolute; inset:0; }
+  .intro-particle{
+    position:absolute;
+    border-radius:50%;
+    background:var(--text-faint);
+    opacity:0;
+    animation:particleFloat linear infinite;
+  }
+  @keyframes particleFloat{
+    0%{ opacity:0; transform:translateY(0) translateX(0); }
+    10%{ opacity:0.5; }
+    90%{ opacity:0.3; }
+    100%{ opacity:0; transform:translateY(-120px) translateX(var(--drift, 20px)); }
+  }
+  .intro-mark{
+    width:min(70vw, 420px);
+    position:relative;
+    z-index:1;
+  }
+  #intro-text{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:88px;
+    fill:none;
+    stroke:var(--text);
+    stroke-width:1.2;
+    stroke-dasharray:900;
+    stroke-dashoffset:900;
+    animation:drawText 1.8s cubic-bezier(.65,0,.35,1) forwards, fillText 0.6s ease forwards 1.7s;
+  }
+  @keyframes drawText{ to{ stroke-dashoffset:0; } }
+  @keyframes fillText{ to{ fill:var(--text); } }
+  #intro-dot{
+    fill:var(--accent);
+    opacity:0;
+    transform-origin:298px 72px;
+    animation:dotPop 0.5s cubic-bezier(.34,1.56,.64,1) forwards 1.9s;
+  }
+  @keyframes dotPop{
+    0%{ opacity:0; transform:scale(0); }
+    60%{ opacity:1; transform:scale(1.4); }
+    100%{ opacity:1; transform:scale(1); }
+  }
+  .intro-skip{
+    position:absolute;
+    bottom:32px; left:50%;
+    transform:translateX(-50%);
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--text-faint);
+    letter-spacing:0.08em;
+    opacity:0;
+    animation:fadeInSkip 0.6s ease forwards 2.6s;
+  }
+  @keyframes fadeInSkip{ to{ opacity:1; } }
+
+
   #auth-screen{
     align-items:center;
     justify-content:center;
@@ -206,7 +289,10 @@
     font-family:var(--font-display); font-weight:700; font-size:14px;
     color:#1a1206;
     flex-shrink:0;
+    background-size:cover;
+    background-position:center;
   }
+  .avatar.has-image{ color:transparent; }
   .me-name{font-weight:600; font-size:14.5px;}
   .me-id{
     font-family:var(--font-mono);
@@ -468,11 +554,133 @@
 
   .composer{
     display:flex;
-    gap:10px;
-    padding:16px 22px;
+    align-items:center;
+    gap:6px;
+    padding:14px 22px;
     border-top:1px solid var(--border);
     background:var(--panel);
+    position:relative;
   }
+  .composer-icon-btn{
+    width:36px; height:36px;
+    flex-shrink:0;
+    border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim);
+    transition:background .15s ease, color .15s ease;
+  }
+  .composer-icon-btn:hover{background:var(--panel-2); color:var(--text);}
+  .composer-icon-btn svg{width:19px; height:19px;}
+  #gif-btn{font-family:var(--font-mono); font-size:10.5px; font-weight:700; letter-spacing:0.03em;}
+
+  .popover{
+    display:none;
+    position:absolute;
+    bottom:100%;
+    left:22px;
+    margin-bottom:8px;
+    width:320px;
+    max-height:340px;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:12px;
+    box-shadow:0 12px 32px rgba(0,0,0,0.4);
+    overflow:hidden;
+    z-index:50;
+  }
+  .popover.open{display:flex; flex-direction:column;}
+  .popover-grid{
+    display:grid;
+    grid-template-columns:repeat(7, 1fr);
+    gap:2px;
+    padding:10px;
+    overflow-y:auto;
+  }
+  .popover-grid button{
+    font-size:20px;
+    padding:6px 0;
+    border-radius:6px;
+    transition:background .1s ease;
+  }
+  .popover-grid button:hover{background:var(--border);}
+  .popover-search{
+    background:var(--panel);
+    border:none;
+    border-bottom:1px solid var(--border);
+    padding:11px 14px;
+    color:var(--text);
+    font-size:13px;
+    flex-shrink:0;
+  }
+  .popover-search:focus{outline:none;}
+  .popover-gif-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    padding:8px;
+    overflow-y:auto;
+  }
+  .popover-gif-grid img{
+    width:100%;
+    height:80px;
+    object-fit:cover;
+    border-radius:6px;
+    cursor:pointer;
+    transition:opacity .1s ease;
+  }
+  .popover-gif-grid img:hover{opacity:0.75;}
+  .popover-empty{
+    padding:24px 14px;
+    text-align:center;
+    color:var(--text-faint);
+    font-size:12.5px;
+  }
+
+  /* Attachment bubbles */
+  .bubble img.msg-image, .bubble video.msg-video{
+    max-width:220px;
+    max-height:220px;
+    border-radius:10px;
+    display:block;
+    margin-bottom:4px;
+  }
+  .bubble .msg-file{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 4px;
+    text-decoration:none;
+    color:inherit;
+  }
+  .bubble .msg-file-icon{
+    width:34px; height:34px;
+    border-radius:8px;
+    background:rgba(255,255,255,0.08);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .bubble .msg-file-name{
+    font-size:13px;
+    font-weight:500;
+    word-break:break-all;
+  }
+  .bubble .msg-file-hint{
+    font-size:10.5px;
+    color:var(--text-faint);
+  }
+  .upload-progress-toast{
+    position:fixed;
+    bottom:24px; left:50%;
+    transform:translateX(-50%);
+    background:var(--panel);
+    border:1px solid var(--border);
+    padding:10px 18px;
+    border-radius:10px;
+    font-size:12.5px;
+    color:var(--text-dim);
+    z-index:150;
+  }
+
   .composer input{
     flex:1;
     background:var(--panel-2);
@@ -535,8 +743,21 @@
 <body>
 <div id="app">
 
+  <!-- ============ INTRO ANIMATION ============ -->
+  <div class="screen active" id="intro-screen">
+    <div class="intro-bg">
+      <div class="intro-particles" id="intro-particles"></div>
+      <div class="intro-glow"></div>
+    </div>
+    <svg class="intro-mark" id="intro-svg" viewBox="0 0 360 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="180" y="130" text-anchor="middle" id="intro-text">nine</text>
+      <circle id="intro-dot" cx="298" cy="72" r="7"/>
+    </svg>
+    <div class="intro-skip">tap anywhere to continue</div>
+  </div>
+
   <!-- ============ AUTH SCREEN ============ -->
-  <div class="screen active" id="auth-screen">
+  <div class="screen" id="auth-screen">
     <div class="auth-box">
       <div class="auth-badge"><span class="dot"></span> NO PHONE NUMBER REQUIRED</div>
       <div class="auth-title">nine<span>.</span></div>
@@ -579,7 +800,8 @@
       <div class="sidebar-header">
         <div class="me-row">
           <div class="me-info">
-            <div class="avatar" id="me-avatar">M</div>
+            <div class="avatar" id="me-avatar" title="Click to change your profile picture" style="cursor:pointer;">M</div>
+            <input type="file" id="avatar-file-input" accept="image/*" style="display:none;">
             <div>
               <div class="me-name" id="me-name">username</div>
               <div class="me-id" id="me-id-display">#000000</div>
@@ -639,10 +861,29 @@
         </div>
         <div class="messages" id="messages"></div>
         <div class="composer">
+          <input type="file" id="attach-file-input" style="display:none;" accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip">
+          <button class="composer-icon-btn" id="attach-btn" title="Attach a file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button class="composer-icon-btn" id="emoji-btn" title="Emoji">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+          </button>
+          <button class="composer-icon-btn" id="gif-btn" title="GIF">GIF</button>
           <input type="text" id="msg-input" placeholder="Type a message…" autocomplete="off">
           <button class="send-btn" id="send-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
+        </div>
+
+        <!-- Emoji picker popover -->
+        <div class="popover" id="emoji-popover">
+          <div class="popover-grid" id="emoji-grid"></div>
+        </div>
+
+        <!-- GIF search popover -->
+        <div class="popover" id="gif-popover">
+          <input type="text" id="gif-search-input" placeholder="Search GIFs…" class="popover-search">
+          <div class="popover-gif-grid" id="gif-grid"></div>
         </div>
       </div>
     </div>
@@ -663,18 +904,11 @@
   </div>
 </div>
 
-<!-- Active call overlay -->
+<!-- Active call overlay — Daily.co renders its own call UI (video tiles,
+     mute/camera controls, leave button) inside #daily-call-container -->
 <div id="active-call-overlay" style="display:none; position:fixed; inset:0; background:#0a0a0d; z-index:200; flex-direction:column;">
-  <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
-    <video id="remote-video" autoplay playsinline style="max-width:100%; max-height:100%; background:#000;"></video>
-    <video id="local-video" autoplay playsinline muted style="position:absolute; bottom:20px; right:20px; width:140px; border-radius:10px; border:2px solid var(--border); background:#000;"></video>
-    <div id="call-status-label" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono);"></div>
-  </div>
-  <div style="padding:20px; display:flex; justify-content:center;">
-    <button id="hangup-btn" style="background:var(--danger); color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.33a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
-    </button>
-  </div>
+  <div id="call-connecting-label" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono); z-index:1;"></div>
+  <div id="daily-call-container" style="flex:1; width:100%; height:100%;"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -682,24 +916,58 @@
 
 <script>
 /* ============================================================
-   NINE — front-end prototype
-   ------------------------------------------------------------
-   This is a self-contained demo using localStorage + in-memory
-   mock data so you can see the full flow before wiring up a
-   real backend. Replace the functions inside `api` with real
-   fetch()/socket.io calls to your server — every place your
-   backend needs to plug in is marked with // BACKEND HOOK.
+   NINE — frontend
    ============================================================ */
+
+// ---------- Intro animation ----------
+(function initIntro(){
+  const particlesEl = document.getElementById('intro-particles');
+  const count = 26;
+  for(let i=0;i<count;i++){
+    const p = document.createElement('div');
+    p.className = 'intro-particle';
+    const size = 2 + Math.random()*3;
+    p.style.width = size+'px';
+    p.style.height = size+'px';
+    p.style.left = Math.random()*100+'%';
+    p.style.top = 40 + Math.random()*50+'%';
+    p.style.setProperty('--drift', (Math.random()*60-30)+'px');
+    p.style.animationDuration = (5+Math.random()*6)+'s';
+    p.style.animationDelay = (Math.random()*6)+'s';
+    particlesEl.appendChild(p);
+  }
+
+  let dismissed = false;
+  function dismiss(){
+    if(dismissed) return;
+    dismissed = true;
+    const intro = document.getElementById('intro-screen');
+    intro.style.transition = 'opacity 0.5s ease';
+    intro.style.opacity = '0';
+    setTimeout(()=>{
+      intro.style.display = 'none';
+      intro.classList.remove('active');
+      document.getElementById('auth-screen').style.display = 'flex';
+      document.getElementById('auth-screen').classList.add('active');
+    }, 500);
+  }
+
+  document.getElementById('intro-screen').addEventListener('click', dismiss);
+  // Auto-continue shortly after the animation finishes drawing
+  setTimeout(dismiss, 3400);
+})();
 
 // ---------- Config ----------
 // Point this at your deployed backend, e.g. 'https://nine-backend.onrender.com'
 const API_BASE = window.NINE_API_BASE || 'http://localhost:4000';
+// Free GIPHY API key — get your own at https://developers.giphy.com (free, beta tier)
+const GIPHY_API_KEY = window.NINE_GIPHY_KEY || '';
 
 let state = {
-  currentUser: null, // {id, username, friendId, isPrivate}
-  friends: [],        // [{id, username, online, lastMsg}]
-  requests: [],        // [{id (request row id), userId, username, friendId}]
-  messages: {},        // {friendUserId: [{fromMe, text, time}]}
+  currentUser: null, // {id, username, friendId, isPrivate, avatarUrl}
+  friends: [],        // [{id, username, online, lastMsg, avatarUrl}]
+  requests: [],        // [{id (request row id), userId, username, friendId, avatarUrl}]
+  messages: {},        // {friendUserId: [{fromMe, text, time, attachment}]}
   token: localStorage.getItem('nine_token') || null,
 };
 
@@ -774,14 +1042,34 @@ const api = {
     const res = await fetch(`${API_BASE}/messages/${friendUserId}`, { headers: authHeaders() });
     return handleRes(res);
   },
-  sendMessage(friendUserId, text){
+  async uploadAvatar(file){
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/uploads/avatar`, {
+      method:'POST',
+      headers: { 'Authorization': `Bearer ${state.token}` }, // no Content-Type — browser sets multipart boundary
+      body: form
+    });
+    return handleRes(res);
+  },
+  async uploadAttachment(file){
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/uploads/attachment`, {
+      method:'POST',
+      headers: { 'Authorization': `Bearer ${state.token}` },
+      body: form
+    });
+    return handleRes(res);
+  },
+  sendMessage(friendUserId, text, attachment){
     // Real-time send over the socket, not HTTP — see connectSocket()
     // IMPORTANT: toUserId must be a Number, not a string — the backend's
     // onlineUsers Map is keyed by numeric ids from the JWT, and Map
     // lookups are NOT type-coerced like plain object keys are.
     return new Promise((resolve, reject)=>{
       if(!socket) return reject(new Error('Not connected'));
-      socket.emit('send_message', { toUserId: Number(friendUserId), text }, (res)=>{
+      socket.emit('send_message', { toUserId: Number(friendUserId), text, attachment }, (res)=>{
         if(res?.error) reject(new Error(res.error));
         else resolve(res.message);
       });
@@ -813,13 +1101,15 @@ function connectSocket(){
   socket.on('receive_message', (msg)=>{
     const otherId = msg.sender_id === state.currentUser.id ? msg.receiver_id : msg.sender_id;
     if(!state.messages[otherId]) state.messages[otherId] = [];
+    const attachment = msg.attachment_url ? { url: msg.attachment_url, type: msg.attachment_type, name: msg.attachment_name } : null;
     state.messages[otherId].push({
       fromMe: msg.sender_id === state.currentUser.id,
       text: msg.content,
-      time: new Date(msg.created_at).getTime()
+      time: new Date(msg.created_at).getTime(),
+      attachment
     });
     const f = state.friends.find(fr=>fr.id===String(otherId));
-    if(f) f.lastMsg = msg.content;
+    if(f) f.lastMsg = attachment ? attachmentPreviewLabel(attachment) : msg.content;
     if(activeFriendId === String(otherId)) renderMessages();
     renderFriends();
   });
@@ -834,7 +1124,7 @@ function connectSocket(){
     try{
       const data = await api.getRequests();
       state.requests = data.requests.map(r=>({
-        id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id
+        id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id, avatarUrl: r.avatar_url
       }));
       renderRequests();
     }catch(e){ /* ignore, will show on next refresh */ }
@@ -843,7 +1133,7 @@ function connectSocket(){
 
   // Call events are wired by CallManager (call.js) once instantiated — see enterApp()
   if(window.CallManager){
-    call = new window.CallManager(socket);
+    call = new window.CallManager(socket, API_BASE, state.token);
     wireCallUI();
   }
 }
@@ -870,6 +1160,18 @@ function toast(msg){
 }
 
 function initials(name){ return name.trim().charAt(0).toUpperCase(); }
+
+function applyAvatar(el, url, name){
+  if(url){
+    el.style.backgroundImage = `url('${url}')`;
+    el.classList.add('has-image');
+    el.textContent = '';
+  } else {
+    el.style.backgroundImage = '';
+    el.classList.remove('has-image');
+    el.textContent = initials(name);
+  }
+}
 
 // ---------- Auth screen logic ----------
 let authMode = 'register';
@@ -927,10 +1229,10 @@ async function loadFriendsAndRequests(){
   try{
     const [friendsData, requestsData] = await Promise.all([api.getFriends(), api.getRequests()]);
     state.friends = friendsData.friends.map(f=>({
-      id: String(f.id), username: f.username, online:false, lastMsg:''
+      id: String(f.id), username: f.username, online:false, lastMsg:'', avatarUrl: f.avatar_url
     }));
     state.requests = requestsData.requests.map(r=>({
-      id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id
+      id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id, avatarUrl: r.avatar_url
     }));
     renderFriends();
     renderRequests();
@@ -944,13 +1246,29 @@ function renderMe(){
   const u = state.currentUser;
   $('#me-name').textContent = u.username;
   $('#me-id-display').textContent = '#' + u.friendId;
-  $('#me-avatar').textContent = initials(u.username);
+  applyAvatar($('#me-avatar'), u.avatarUrl, u.username);
   const sw = $('#privacy-switch');
   sw.classList.toggle('on', u.isPrivate);
   $('#privacy-label').textContent = u.isPrivate
     ? 'Private — only your ID number can add you'
     : 'Public — anyone can find you by username';
 }
+
+$('#me-avatar').addEventListener('click', ()=> $('#avatar-file-input').click());
+$('#avatar-file-input').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
+  try{
+    const data = await api.uploadAvatar(file);
+    state.currentUser.avatarUrl = data.avatarUrl;
+    renderMe();
+    toast('Profile picture updated');
+  }catch(err){
+    toast(err.message);
+  }
+  e.target.value = '';
+});
 
 $('#privacy-switch').addEventListener('click', async ()=>{
   state.currentUser.isPrivate = !state.currentUser.isPrivate;
@@ -994,7 +1312,7 @@ function renderFriends(){
   }
   list.innerHTML = state.friends.map(f=>`
     <div class="friend-item ${f.id===activeFriendId?'selected':''}" data-id="${f.id}">
-      <div class="avatar">${initials(f.username)}${f.online?'<span class="online-dot"></span>':''}</div>
+      <div class="avatar ${f.avatarUrl?'has-image':''}" style="${f.avatarUrl?`background-image:url('${f.avatarUrl}')`:''}">${f.avatarUrl?'':initials(f.username)}${f.online?'<span class="online-dot"></span>':''}</div>
       <div class="friend-meta">
         <div class="friend-name">${escapeHtml(f.username)}</div>
         <div class="friend-preview">${escapeHtml(f.lastMsg || '')}</div>
@@ -1020,7 +1338,7 @@ function renderRequests(){
   list.innerHTML = state.requests.map(r=>`
     <div class="req-item" data-row-id="${r.id ?? ''}" data-user-id="${r.userId}">
       <div class="req-top">
-        <div class="avatar">${initials(r.username)}</div>
+        <div class="avatar ${r.avatarUrl?'has-image':''}" style="${r.avatarUrl?`background-image:url('${r.avatarUrl}')`:''}">${r.avatarUrl?'':initials(r.username)}</div>
         <div>
           <div class="friend-name">${escapeHtml(r.username)}</div>
           <div class="friend-id-tag">#${r.friendId}</div>
@@ -1042,7 +1360,7 @@ function renderRequests(){
       try{
         if(btn.dataset.action === 'accept'){
           await api.acceptRequest(rowId);
-          state.friends.push({ id:userId, username:req.username, online:false, lastMsg:'' });
+          state.friends.push({ id:userId, username:req.username, online:false, lastMsg:'', avatarUrl:req.avatarUrl });
           state.messages[userId] = [];
           toast(`You're now friends with ${req.username}`);
         } else {
@@ -1091,7 +1409,7 @@ async function openChat(id){
 
   $('#chat-empty').style.display = 'none';
   $('#chat-active').style.display = 'flex';
-  $('#chat-avatar').textContent = initials(f.username);
+  applyAvatar($('#chat-avatar'), f.avatarUrl, f.username);
   $('#chat-name').textContent = f.username;
   updateChatHeaderStatus(f);
 
@@ -1101,7 +1419,8 @@ async function openChat(id){
       state.messages[id] = data.messages.map(m=>({
         fromMe: m.sender_id === state.currentUser.id,
         text: m.content,
-        time: new Date(m.created_at).getTime()
+        time: new Date(m.created_at).getTime(),
+        attachment: m.attachment_url ? { url: m.attachment_url, type: m.attachment_type, name: m.attachment_name } : null
       }));
     }catch(err){
       state.messages[id] = [];
@@ -1128,10 +1447,34 @@ function renderMessages(){
   const msgs = state.messages[activeFriendId] || [];
   box.innerHTML = msgs.map(m=>`
     <div class="msg-row ${m.fromMe?'mine':'theirs'}">
-      <div class="bubble">${escapeHtml(m.text)}<span class="time">${formatTime(m.time)}</span></div>
+      <div class="bubble">${renderMessageContent(m)}<span class="time">${formatTime(m.time)}</span></div>
     </div>
   `).join('');
   box.scrollTop = box.scrollHeight;
+}
+
+function renderMessageContent(m){
+  let html = '';
+  if(m.attachment){
+    const a = m.attachment;
+    if(a.type === 'image' || a.type === 'gif'){
+      html += `<img class="msg-image" src="${a.url}" alt="${escapeHtml(a.name||'image')}" loading="lazy">`;
+    } else if(a.type === 'video'){
+      html += `<video class="msg-video" src="${a.url}" controls></video>`;
+    } else {
+      html += `<a class="msg-file" href="${a.url}" target="_blank" rel="noopener">
+        <div class="msg-file-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div>
+          <div class="msg-file-name">${escapeHtml(a.name||'File')}</div>
+          <div class="msg-file-hint">Tap to open</div>
+        </div>
+      </a>`;
+    }
+  }
+  if(m.text) html += escapeHtml(m.text);
+  return html;
 }
 
 function formatTime(ts){
@@ -1139,29 +1482,38 @@ function formatTime(ts){
   return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
 
-$('#send-btn').addEventListener('click', sendMsg);
+$('#send-btn').addEventListener('click', ()=>sendMsg());
 $('#msg-input').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMsg(); });
 
-async function sendMsg(){
+async function sendMsg(attachment){
   const input = $('#msg-input');
   const text = input.value.trim();
-  if(!text || !activeFriendId) return;
+  if(!text && !attachment) return;
+  if(!activeFriendId) return;
   input.value = '';
+  closeAllPopovers();
 
   try{
-    await api.sendMessage(activeFriendId, text);
+    await api.sendMessage(activeFriendId, text, attachment);
     // Our own message also arrives back via the 'receive_message' socket
     // event (server echoes it to the sender's other tabs), but we render
     // optimistically here so the UI feels instant:
     if(!state.messages[activeFriendId]) state.messages[activeFriendId] = [];
-    state.messages[activeFriendId].push({ fromMe:true, text, time:Date.now() });
+    state.messages[activeFriendId].push({ fromMe:true, text, time:Date.now(), attachment });
     renderMessages();
     const f = state.friends.find(fr=>fr.id===activeFriendId);
-    if(f) f.lastMsg = text;
+    if(f) f.lastMsg = attachment ? attachmentPreviewLabel(attachment) : text;
     renderFriends();
   }catch(err){
     toast(err.message);
   }
+}
+
+function attachmentPreviewLabel(att){
+  if(att.type === 'image') return '📷 Photo';
+  if(att.type === 'video') return '🎬 Video';
+  if(att.type === 'gif') return 'GIF';
+  return '📎 ' + (att.name || 'File');
 }
 
 function escapeHtml(str){
@@ -1170,17 +1522,130 @@ function escapeHtml(str){
   return div.innerHTML;
 }
 
+// ---------- Composer: emoji, GIF, file attach ----------
+const EMOJI_LIST = ['😀','😂','🥹','😍','😘','😎','🤔','😭','😡','🥳','😴','🤗','😬','🙃','😇','🤝','👍','👎','👏','🙌','🙏','💪','✌️','🤞','❤️','🔥','✨','🎉','💯','⭐','🥲','😅','😉','😢','🤯','🫡','👀','💀','🤡','😱','🤩','😏','🫶','🖤','💔','👋','🎂','☕','🍕'];
+
+function closeAllPopovers(){
+  $('#emoji-popover').classList.remove('open');
+  $('#gif-popover').classList.remove('open');
+}
+
+(function initComposer(){
+  const emojiGrid = $('#emoji-grid');
+  emojiGrid.innerHTML = EMOJI_LIST.map(e=>`<button type="button">${e}</button>`).join('');
+  emojiGrid.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    const input = $('#msg-input');
+    input.value += btn.textContent;
+    input.focus();
+  });
+
+  $('#emoji-btn').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const wasOpen = $('#emoji-popover').classList.contains('open');
+    closeAllPopovers();
+    if(!wasOpen) $('#emoji-popover').classList.add('open');
+  });
+
+  $('#gif-btn').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const wasOpen = $('#gif-popover').classList.contains('open');
+    closeAllPopovers();
+    if(!wasOpen){
+      $('#gif-popover').classList.add('open');
+      searchGifs('trending');
+      $('#gif-search-input').focus();
+    }
+  });
+
+  document.addEventListener('click', (e)=>{
+    if(!e.target.closest('.popover') && !e.target.closest('#emoji-btn') && !e.target.closest('#gif-btn')){
+      closeAllPopovers();
+    }
+  });
+
+  let gifDebounce;
+  $('#gif-search-input').addEventListener('input', (e)=>{
+    clearTimeout(gifDebounce);
+    const q = e.target.value.trim();
+    gifDebounce = setTimeout(()=> searchGifs(q || 'trending'), 350);
+  });
+
+  $('#attach-btn').addEventListener('click', ()=> $('#attach-file-input').click());
+  $('#attach-file-input').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    e.target.value = '';
+    if(!file || !activeFriendId) return;
+    await uploadAndSendAttachment(file);
+  });
+})();
+
+async function searchGifs(query){
+  const grid = $('#gif-grid');
+  if(!GIPHY_API_KEY){
+    grid.innerHTML = `<div class="popover-empty" style="grid-column:1/-1;">GIF search needs a GIPHY API key.<br>Set window.NINE_GIPHY_KEY (see README).</div>`;
+    return;
+  }
+  grid.innerHTML = `<div class="popover-empty" style="grid-column:1/-1;">Searching…</div>`;
+  try{
+    const endpoint = query === 'trending'
+      ? `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=16&rating=pg-13`
+      : `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=16&rating=pg-13`;
+    const res = await fetch(endpoint);
+    const data = await res.json();
+    if(!data.data || data.data.length === 0){
+      grid.innerHTML = `<div class="popover-empty" style="grid-column:1/-1;">No GIFs found</div>`;
+      return;
+    }
+    grid.innerHTML = data.data.map(g=>{
+      const preview = g.images.fixed_height_small?.url || g.images.fixed_height?.url;
+      const full = g.images.fixed_height?.url || preview;
+      return `<img src="${preview}" data-full="${full}" alt="${escapeHtml(g.title||'gif')}">`;
+    }).join('');
+    grid.querySelectorAll('img').forEach(img=>{
+      img.addEventListener('click', ()=>{
+        sendMsg({ url: img.dataset.full, type:'gif', name:'gif' });
+      });
+    });
+  }catch(err){
+    grid.innerHTML = `<div class="popover-empty" style="grid-column:1/-1;">Couldn't load GIFs</div>`;
+  }
+}
+
+async function uploadAndSendAttachment(file){
+  const sizeMb = (file.size / (1024*1024)).toFixed(1);
+  if(file.size > 25*1024*1024){
+    toast('That file is too large (max 25MB)');
+    return;
+  }
+  const progressToast = document.createElement('div');
+  progressToast.className = 'upload-progress-toast';
+  progressToast.textContent = `Uploading ${file.name} (${sizeMb}MB)…`;
+  document.body.appendChild(progressToast);
+
+  try{
+    const data = await api.uploadAttachment(file);
+    await sendMsg({ url: data.url, type: data.type, name: data.name });
+  }catch(err){
+    toast(err.message);
+  }finally{
+    progressToast.remove();
+  }
+}
+
 // ---------- Calling ----------
 function wireCallUI(){
   const incomingModal = $('#incoming-call-modal');
   const activeOverlay = $('#active-call-overlay');
-  const remoteVideo = $('#remote-video');
-  const localVideo = $('#local-video');
-  const statusLabel = $('#call-status-label');
+  const connectingLabel = $('#call-connecting-label');
+  const dailyContainer = $('#daily-call-container');
+
+  call.setContainer(dailyContainer);
 
   call.onIncomingCall = (fromUserId, callType) => {
     const f = state.friends.find(fr=>fr.id===String(fromUserId));
-    $('#incoming-avatar').textContent = f ? initials(f.username) : '?';
+    applyAvatar($('#incoming-avatar'), f ? f.avatarUrl : null, f ? f.username : '?');
     $('#incoming-name').textContent = f ? f.username : 'Someone';
     $('#incoming-type').textContent = `Incoming ${callType} call…`;
     incomingModal.style.display = 'flex';
@@ -1188,8 +1653,6 @@ function wireCallUI(){
 
   $('#incoming-accept-btn').addEventListener('click', async ()=>{
     incomingModal.style.display = 'none';
-    activeOverlay.style.display = 'flex';
-    statusLabel.textContent = 'Connecting…';
     await call.acceptCall();
   });
 
@@ -1198,39 +1661,46 @@ function wireCallUI(){
     call.declineCall();
   });
 
-  call.onLocalStream = (stream) => { localVideo.srcObject = stream; };
-  call.onRemoteStream = (stream) => {
-    remoteVideo.srcObject = stream;
-    statusLabel.textContent = 'Connected';
+  call.onCallStarted = () => {
+    activeOverlay.style.display = 'flex';
+    connectingLabel.textContent = 'Connecting…';
+    // Daily's own UI takes over once its iframe mounts, so the label
+    // fades itself out shortly after — Daily shows connection state
+    // inside its own frame.
+    setTimeout(()=>{ connectingLabel.textContent = ''; }, 4000);
   };
   call.onCallEnded = () => {
     activeOverlay.style.display = 'none';
     incomingModal.style.display = 'none';
-    remoteVideo.srcObject = null;
-    localVideo.srcObject = null;
+    dailyContainer.innerHTML = '';
   };
   call.onCallDeclined = () => {
     activeOverlay.style.display = 'none';
+    dailyContainer.innerHTML = '';
     toast('Call declined');
   };
   call.onCallUnavailable = () => {
     activeOverlay.style.display = 'none';
+    dailyContainer.innerHTML = '';
     toast('They are offline right now');
   };
-
-  $('#hangup-btn').addEventListener('click', ()=> call.hangUp());
+  call.onCallError = (message) => {
+    activeOverlay.style.display = 'none';
+    dailyContainer.innerHTML = '';
+    toast(message);
+  };
 
   $('#call-audio-btn').addEventListener('click', async ()=>{
     if(!activeFriendId) return;
     activeOverlay.style.display = 'flex';
-    statusLabel.textContent = 'Calling…';
+    connectingLabel.textContent = 'Calling…';
     await call.startCall(Number(activeFriendId), 'audio');
   });
 
   $('#call-video-btn').addEventListener('click', async ()=>{
     if(!activeFriendId) return;
     activeOverlay.style.display = 'flex';
-    statusLabel.textContent = 'Calling…';
+    connectingLabel.textContent = 'Calling…';
     await call.startCall(Number(activeFriendId), 'video');
   });
 }
