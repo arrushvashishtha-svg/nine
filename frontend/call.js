@@ -102,6 +102,7 @@ class CallManager {
 
   // ---- Caller side ----
   async startCall(toUserId, callType = 'video') {
+    console.log('[nine-call] starting call to', toUserId, callType);
     this.remoteUserId = toUserId;
     this.pendingCallType = callType;
     this.socket.emit('call:invite', { toUserId, callType });
@@ -131,6 +132,7 @@ class CallManager {
   // ---- Internals ----
   async _setupPeerConnection(remoteUserId) {
     this.remoteUserId = remoteUserId;
+    console.log('[nine-call] setting up peer connection with', remoteUserId);
 
     this.peerConnection = new RTCPeerConnection({
       iceServers: [
@@ -149,7 +151,12 @@ class CallManager {
       }
     };
 
+    this.peerConnection.oniceconnectionstatechange = () => {
+      console.log('[nine-call] ICE state:', this.peerConnection.iceConnectionState);
+    };
+
     this.peerConnection.ontrack = (event) => {
+      console.log('[nine-call] remote track received');
       this.onRemoteStream?.(event.streams[0]);
     };
 
@@ -157,7 +164,12 @@ class CallManager {
       ? { audio: true, video: false }
       : { audio: true, video: true };
 
-    this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    try {
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      console.error('[nine-call] getUserMedia failed:', err.name, err.message);
+      throw err;
+    }
     this.onLocalStream?.(this.localStream);
     this.localStream.getTracks().forEach(track => {
       this.peerConnection.addTrack(track, this.localStream);
