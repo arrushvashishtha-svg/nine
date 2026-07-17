@@ -1132,9 +1132,13 @@ function connectSocket(){
   });
 
   // Call events are wired by CallManager (call.js) once instantiated — see enterApp()
+  console.log('[nine] window.CallManager available?', typeof window.CallManager);
   if(window.CallManager){
     call = new window.CallManager(socket, API_BASE, state.token);
     wireCallUI();
+    console.log('[nine] call UI wired successfully');
+  } else {
+    console.error('[nine] CallManager is missing — call.js did not load correctly. Check the Network tab for a failed request to call.js');
   }
 }
 
@@ -1691,6 +1695,7 @@ function wireCallUI(){
   };
 
   $('#call-audio-btn').addEventListener('click', async ()=>{
+    console.log('[nine] audio call button clicked, activeFriendId=', activeFriendId);
     if(!activeFriendId) return;
     activeOverlay.style.display = 'flex';
     connectingLabel.textContent = 'Calling…';
@@ -1698,6 +1703,7 @@ function wireCallUI(){
   });
 
   $('#call-video-btn').addEventListener('click', async ()=>{
+    console.log('[nine] video call button clicked, activeFriendId=', activeFriendId);
     if(!activeFriendId) return;
     activeOverlay.style.display = 'flex';
     connectingLabel.textContent = 'Calling…';
