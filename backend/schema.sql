@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS users (
 -- Case-insensitive uniqueness on username
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
 
+-- These ALTER TABLE statements exist because CREATE TABLE IF NOT EXISTS
+-- above is a no-op once the table already exists from an earlier deploy —
+-- it will NOT add new columns to a table that's already there. Each of
+-- these is safe to run repeatedly (IF NOT EXISTS / conditional checks).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
 CREATE TABLE IF NOT EXISTS friend_requests (
   id SERIAL PRIMARY KEY,
   sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -37,13 +43,26 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   content TEXT,                            -- text content, nullable if attachment-only
-  attachment_url TEXT,                     -- Cloudinary URL, if any
-  attachment_type VARCHAR(20),             -- 'image' | 'video' | 'file' | 'gif'
-  attachment_name TEXT,                    -- original filename, for documents
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  read_at TIMESTAMPTZ,
-  CONSTRAINT message_has_content CHECK (content IS NOT NULL OR attachment_url IS NOT NULL)
+  read_at TIMESTAMPTZ
 );
+
+-- Same reasoning as above: add attachment support to a messages table
+-- that may already exist from before these columns were introduced.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_url TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(20);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
+ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'message_has_content'
+  ) THEN
+    ALTER TABLE messages ADD CONSTRAINT message_has_content
+      CHECK (content IS NOT NULL OR attachment_url IS NOT NULL);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages (sender_id, receiver_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver ON friend_requests (receiver_id, status);
