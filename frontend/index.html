@@ -1132,9 +1132,13 @@ function connectSocket(){
   });
 
   // Call events are wired by CallManager (call.js) once instantiated — see enterApp()
-  console.log('[nine] window.CallManager available?', typeof window.CallManager);
-  if(window.CallManager){
-    call = new window.CallManager(socket, API_BASE, state.token);
+  // NOTE: class declarations don't attach to `window` the way function/var
+  // declarations do, so we check the plain identifier via typeof instead
+  // of window.CallManager (which will always be undefined even when the
+  // class loaded fine).
+  console.log('[nine] CallManager available?', typeof CallManager);
+  if(typeof CallManager !== 'undefined'){
+    call = new CallManager(socket, API_BASE, state.token);
     wireCallUI();
     console.log('[nine] call UI wired successfully');
   } else {
