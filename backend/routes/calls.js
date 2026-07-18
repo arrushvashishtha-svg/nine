@@ -1,59 +1,51 @@
-// Creates Daily.co video call rooms on demand. Daily handles the entire
-// WebRTC layer (peer connection, TURN relay, media) — our job is just
-// to create a short-lived room and hand both participants the URL.
+// Generates short-lived Agora tokens so two friends can join the same
+// voice/video "channel". Agora's SDK handles the entire WebRTC layer —
+// peer connection, routing, and media — on their global network.
 //
-// Sign up free at https://www.daily.co (free tier includes up to 5
-// simultaneous rooms, no card required). Dashboard -> Developers tab
-// has your API key. Put it in .env as DAILY_API_KEY.
+// Sign up free at https://www.agora.io (no credit card required; 10,000
+// free minutes/month, shared across all your projects). In the Agora
+// Console, create a project to get your App ID and App Certificate.
 
 const express = require('express');
+const { RtcTokenBuilder, RtcRole } = require('agora-token');
 const { requireAuth } = require('../utils/authMiddleware');
 
 const router = express.Router();
 router.use(requireAuth);
 
-// POST /calls/room — creates a new short-lived Daily room for a 1:1 call.
-// Both the caller and callee join the same room URL.
-router.post('/room', async (req, res) => {
-  const apiKey = process.env.DAILY_API_KEY;
-  if (!apiKey) {
+// POST /calls/token  { channelName }
+// Both participants call this with the SAME channelName (we use a
+// deterministic name built from both user IDs, sorted, so either side
+// generates the same string) and each gets back their own token.
+router.post('/token', async (req, res) => {
+  const appId = process.env.AGORA_APP_ID;
+  const appCertificate = process.env.AGORA_APP_CERTIFICATE;
+
+  if (!appId || !appCertificate) {
     return res.status(503).json({ error: 'Calling is not configured on this server yet' });
   }
 
+  const { channelName } = req.body;
+  if (!channelName || typeof channelName !== 'string' || channelName.length > 64) {
+    return res.status(400).json({ error: 'Invalid channel name' });
+  }
+
   try {
-    const response = await fetch('https://api.daily.co/v1/rooms', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        properties: {
-          // Room auto-expires 1 hour after creation so free-tier room
-          // limits never fill up with abandoned calls.
-          exp: Math.floor(Date.now() / 1000) + 60 * 60,
-          eject_at_room_exp: true,
-          enable_chat: false,
-          enable_screenshare: true,
-          start_video_off: false,
-          start_audio_off: false,
-        },
-      }),
-    });
+    const uid = req.userId; // Agora uses this as the participant's identifier in the channel
+    const role = RtcRole.PUBLISHER;
+    const expireSeconds = 60 * 60; // 1 hour — plenty for a call, short-lived for safety
+    const currentTs = Math.floor(Date.now() / 1000);
+    const privilegeExpireTs = currentTs + expireSeconds;
 
-    if (!response.ok) {
-      const errBody = await response.text();
-      console.error('Daily room creation failed:', response.status, errBody);
-      return res.status(502).json({ error: 'Could not create call room' });
-    }
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      appId, appCertificate, channelName, uid, role, privilegeExpireTs, privilegeExpireTs
+    );
 
-    const room = await response.json();
-    res.json({ url: room.url, name: room.name });
+    res.json({ token, appId, uid, channelName });
   } catch (err) {
-    console.error('Daily room creation error:', err);
-    res.status(500).json({ error: 'Could not create call room' });
+    console.error('Agora token generation error:', err);
+    res.status(500).json({ error: 'Could not generate call token' });
   }
 });
 
 module.exports = router;
-

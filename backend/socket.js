@@ -121,13 +121,13 @@ function initSocket(io) {
     // server.js calls io.to(...).emit('friend_request', ...) directly
     // from the HTTP route after a request is inserted — see server.js.
 
-    // ---------------- CALL SIGNALING (Daily.co rooms) ----------------
-    // Daily.co handles the actual WebRTC connection, TURN relay, and
-    // media entirely on their side. Socket.IO's only job here is to
-    // notify the other person "hey, join this room" and to let either
+    // ---------------- CALL SIGNALING (Agora) ----------------
+    // Agora's SDK handles the actual WebRTC connection, routing, and
+    // media entirely on their network. Socket.IO's only job here is to
+    // notify the other person "hey, join this channel" and to let either
     // side cancel/decline/hang up before or during the call.
 
-    socket.on('call:invite', async ({ toUserId, callType, roomUrl }) => {
+    socket.on('call:invite', async ({ toUserId, callType, channelName }) => {
       const friends = await areFriends(userId, toUserId).catch(() => false);
       if (!friends) return;
 
@@ -137,7 +137,7 @@ function initSocket(io) {
         return;
       }
       for (const sockId of targetSockets) {
-        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType, roomUrl });
+        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType, channelName });
       }
     });
 

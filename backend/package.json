@@ -10,6 +10,7 @@
     "migrate": "node migrate.js"
   },
   "dependencies": {
+    "agora-token": "^2.0.5",
     "bcrypt": "^5.1.1",
     "cloudinary": "^2.4.0",
     "cors": "^2.8.5",

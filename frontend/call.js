@@ -1,27 +1,30 @@
 /*
-  call.js — voice/video calling using Daily.co.
+  call.js — voice/video calling using Agora.
 
-  HOW THIS WORKS NOW:
-  Daily.co handles the entire WebRTC layer for you — the peer connection,
-  TURN relay, and media all happen inside their embedded call frame
-  (an iframe they manage). You don't touch RTCPeerConnection or ICE
-  candidates at all anymore.
+  HOW THIS WORKS:
+  Agora's SDK handles the entire WebRTC layer for you — routing, media,
+  and their global network — so you don't manage peer connections or
+  ICE candidates directly. Instead, both participants join the same
+  named "channel" using a short-lived token from your backend.
 
   Flow:
-  1. Caller asks the backend to create a Daily "room" (POST /calls/room)
-  2. Caller sends the room URL to the callee via Socket.IO ('call:invite')
-  3. Callee accepts -> both sides call daily-js's join() with that URL
-  4. Daily's iframe renders the whole call UI (video tiles, mute button,
-     camera toggle, etc.) inside the container element you give it
+  1. Caller and callee agree on a channel name (deterministic: built
+     from both user IDs sorted, so both sides compute the same string)
+  2. Caller sends a ring ('call:invite') with that channel name via
+     Socket.IO
+  3. Callee accepts -> both sides ask the backend for a token
+     (POST /calls/token) and call Agora's join() with that token
+  4. Agora's SDK publishes local audio/video and delivers the other
+     person's stream via the 'user-published' event
 
-  Requires the Daily.co client library loaded on the page:
-    <script src="https://unpkg.com/@daily-co/daily-js"></script>
+  Requires the Agora Web SDK loaded on the page:
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
 
   USAGE (wire this up in your main app.js):
-    const call = new CallManager(socket, API_BASE, state.token);
-    call.setContainer(document.getElementById('daily-call-container'));
+    const call = new CallManager(socket, API_BASE, state.token, myUserId);
     call.onIncomingCall = (fromUserId, callType) => { ...show incoming UI... };
-    call.onCallStarted = () => { ...show call container, hide other UI... };
+    call.onRemoteStream = (stream) => { remoteVideoEl.srcObject/attach... };
+    call.onLocalStream = (stream) => { localVideoEl attach... };
     call.onCallEnded = () => { ...hide call UI... };
 
     // to start a call:
@@ -36,19 +39,22 @@
 */
 
 class CallManager {
-  constructor(socket, apiBase, authToken) {
+  constructor(socket, apiBase, authToken, myUserId) {
     this.socket = socket;
     this.apiBase = apiBase;
     this.authToken = authToken;
-    this.callFrame = null;
-    this.containerEl = null;
+    this.myUserId = myUserId;
+    this.client = null;
+    this.localAudioTrack = null;
+    this.localVideoTrack = null;
     this.remoteUserId = null;
     this.pendingCallType = null;
-    this.pendingRoomUrl = null;
+    this.pendingChannelName = null;
 
     // Callbacks — set these from your UI code
     this.onIncomingCall = null;   // (fromUserId, callType) => {}
-    this.onCallStarted = null;    // () => {} — call frame is about to render, show your call container
+    this.onRemoteVideoTrack = null; // (track) => {} — call track.play(el) yourself
+    this.onLocalVideoTrack = null;  // (track) => {}
     this.onCallEnded = null;      // () => {}
     this.onCallDeclined = null;   // () => {}
     this.onCallUnavailable = null;// () => {} — friend is offline
@@ -57,17 +63,24 @@ class CallManager {
     this._bindSocketEvents();
   }
 
+  _channelNameFor(otherUserId) {
+    // Deterministic, so both sides independently compute the identical
+    // channel name without needing to pass it back and forth first.
+    const ids = [this.myUserId, otherUserId].sort((a, b) => a - b);
+    return `nine-${ids[0]}-${ids[1]}`;
+  }
+
   _bindSocketEvents() {
-    this.socket.on('call:incoming', ({ fromUserId, callType, roomUrl }) => {
+    this.socket.on('call:incoming', ({ fromUserId, callType, channelName }) => {
       this.remoteUserId = fromUserId;
       this.pendingCallType = callType;
-      this.pendingRoomUrl = roomUrl;
+      this.pendingChannelName = channelName;
       this.onIncomingCall?.(fromUserId, callType);
     });
 
     this.socket.on('call:accepted', async () => {
-      // We were the caller; the other side accepted — join the room now.
-      await this._joinRoom(this.pendingRoomUrl, this.pendingCallType);
+      // We're the caller; the other side accepted — join the channel now.
+      await this._joinChannel(this.pendingChannelName, this.pendingCallType);
     });
 
     this.socket.on('call:declined', () => {
@@ -86,40 +99,19 @@ class CallManager {
     });
   }
 
-  setContainer(containerEl) {
-    this.containerEl = containerEl;
-  }
-
   // ---- Caller side ----
   async startCall(toUserId, callType = 'video') {
+    console.log('[nine-call] starting call to', toUserId, callType);
     this.remoteUserId = toUserId;
     this.pendingCallType = callType;
-
-    try {
-      const res = await fetch(`${this.apiBase}/calls/room`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.authToken}`,
-        },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        this.onCallError?.(data.error || 'Could not start the call');
-        return;
-      }
-      this.pendingRoomUrl = data.url;
-      this.socket.emit('call:invite', { toUserId, callType, roomUrl: data.url });
-    } catch (err) {
-      console.error('[nine-call] failed to create room:', err);
-      this.onCallError?.('Could not reach the calling service');
-    }
+    this.pendingChannelName = this._channelNameFor(toUserId);
+    this.socket.emit('call:invite', { toUserId, callType, channelName: this.pendingChannelName });
   }
 
   // ---- Callee side ----
   async acceptCall() {
     this.socket.emit('call:accept', { toUserId: this.remoteUserId });
-    await this._joinRoom(this.pendingRoomUrl, this.pendingCallType);
+    await this._joinChannel(this.pendingChannelName, this.pendingCallType);
   }
 
   declineCall() {
@@ -136,71 +128,94 @@ class CallManager {
   }
 
   // ---- Internals ----
-  async _joinRoom(roomUrl, callType) {
-    if (!roomUrl) {
-      console.error('[nine-call] no room URL to join');
-      this.onCallError?.('Could not join the call — missing room link');
-      return;
-    }
-    if (!window.DailyIframe) {
-      console.error('[nine-call] Daily.co script not loaded');
+  async _getToken(channelName) {
+    const res = await fetch(`${this.apiBase}/calls/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.authToken}`,
+      },
+      body: JSON.stringify({ channelName }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not get a call token');
+    return data;
+  }
+
+  async _joinChannel(channelName, callType) {
+    if (!window.AgoraRTC) {
+      console.error('[nine-call] Agora SDK not loaded');
       this.onCallError?.('Calling library did not load — check your connection and try again');
       return;
     }
 
-    console.log('[nine-call] joining room', roomUrl);
-    this.onCallStarted?.();
-
-    // Give the UI a tick to show the call container before we mount into it
-    await new Promise(r => setTimeout(r, 0));
-
-    this.callFrame = window.DailyIframe.createFrame(this.containerEl, {
-      showLeaveButton: true,
-      iframeStyle: {
-        width: '100%',
-        height: '100%',
-        border: '0',
-      },
-    });
-
-    this.callFrame.on('left-meeting', () => {
-      this.hangUp();
-    });
-    this.callFrame.on('error', (e) => {
-      console.error('[nine-call] Daily error:', e);
-      this.onCallError?.('Call connection error: ' + (e?.errorMsg || 'unknown'));
-    });
+    console.log('[nine-call] joining channel', channelName);
 
     try {
-      await this.callFrame.join({
-        url: roomUrl,
-        startVideoOff: callType === 'audio',
+      const { token, appId, uid } = await this._getToken(channelName);
+
+      this.client = window.AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+      this.client.on('user-published', async (user, mediaType) => {
+        await this.client.subscribe(user, mediaType);
+        if (mediaType === 'video') {
+          this.onRemoteVideoTrack?.(user.videoTrack);
+        }
+        if (mediaType === 'audio') {
+          user.audioTrack.play();
+        }
       });
+
+      this.client.on('user-left', () => {
+        this.hangUp();
+      });
+
+      await this.client.join(appId, channelName, token, uid);
+
+      this.localAudioTrack = await window.AgoraRTC.createMicrophoneAudioTrack();
+      const tracksToPublish = [this.localAudioTrack];
+
+      if (callType !== 'audio') {
+        this.localVideoTrack = await window.AgoraRTC.createCameraVideoTrack();
+        this.onLocalVideoTrack?.(this.localVideoTrack);
+        tracksToPublish.push(this.localVideoTrack);
+      }
+
+      await this.client.publish(tracksToPublish);
     } catch (err) {
       console.error('[nine-call] join failed:', err);
-      this.onCallError?.('Could not join the call');
+      this.onCallError?.(
+        (err.name === 'NotAllowedError' || /Permission/i.test(err.message || ''))
+          ? 'Camera/mic permission was denied'
+          : 'Could not join the call: ' + (err.message || 'unknown error')
+      );
       this._cleanup();
     }
   }
 
   _cleanup() {
-    if (this.callFrame) {
-      try {
-        this.callFrame.destroy();
-      } catch (e) { /* already gone */ }
-      this.callFrame = null;
+    if (this.localAudioTrack) {
+      this.localAudioTrack.close();
+      this.localAudioTrack = null;
+    }
+    if (this.localVideoTrack) {
+      this.localVideoTrack.close();
+      this.localVideoTrack = null;
+    }
+    if (this.client) {
+      try { this.client.leave(); } catch (e) { /* already left */ }
+      this.client = null;
     }
     this.remoteUserId = null;
     this.pendingCallType = null;
-    this.pendingRoomUrl = null;
+    this.pendingChannelName = null;
   }
 }
 
 /*
-  ABOUT DAILY'S FREE TIER:
-  - No card required to start
-  - Up to 5 simultaneous active rooms on the free plan (fine for a
-    personal project — rooms auto-expire 1 hour after creation, see
-    the backend's /calls/room route, so old calls don't pile up)
-  - If you outgrow this, Daily's paid tiers raise the room limit
+  ABOUT AGORA'S FREE TIER:
+  - No credit card required to sign up or use the free tier
+  - 10,000 free minutes per month, shared across all projects on the account
+  - If you outgrow this, Agora's pay-as-you-go rates kick in automatically
+    only once you exceed the free allowance
 */

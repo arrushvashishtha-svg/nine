@@ -146,17 +146,19 @@ this server. That means:
 
 ## 6. New features — what you need to set up
 
-### Voice/video calling (Daily.co)
-Daily.co manages the entire call — peer connection, TURN relay, and the
-call UI itself (video tiles, mute button, camera toggle, leave button)
-all come from their embedded frame. Your backend just creates a room;
-your frontend just joins it.
-1. Sign up free at https://www.daily.co (no card required, free tier
-   includes up to 5 simultaneous rooms)
-2. Dashboard → Developers tab shows your API key
-3. On your backend service in Render → Environment, add:
-   - `DAILY_API_KEY`
-4. Redeploy. Without this key, starting a call shows a friendly
+### Voice/video calling (Agora)
+Agora handles the entire call — routing, media, and their global
+network — through their SDK. Your backend generates short-lived tokens;
+your frontend joins a shared "channel" with that token. Genuinely free,
+no credit card required at any point, 10,000 free minutes/month.
+1. Sign up free at https://www.agora.io
+2. In the Agora Console, create a project to get your App ID
+3. Enable "App Certificate" for that project (Console -> your project ->
+   Config -> Primary Certificate) to get your App Certificate
+4. On your backend service in Render -> Environment, add:
+   - `AGORA_APP_ID`
+   - `AGORA_APP_CERTIFICATE`
+5. Redeploy. Without these, starting a call shows a friendly
    "calling is not configured yet" message instead of failing silently.
 
 ### Profile pictures, images, video, documents in chat (Cloudinary)
