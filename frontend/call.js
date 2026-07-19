@@ -142,6 +142,28 @@ class CallManager {
     return data;
   }
 
+  // Checks what devices are actually available before we ask Agora to
+  // grab one. Browsers/OSes report "no device" in two different ways:
+  // either enumerateDevices() simply lists none, or the device exists
+  // but is blocked/busy and getUserMedia-style calls throw instead.
+  // We only trust enumerateDevices() here as a pre-check; Agora's own
+  // create*Track() calls are still wrapped in try/catch below as the
+  // final source of truth.
+  async _checkDevices() {
+    let hasMic = false;
+    let hasCam = false;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      hasMic = devices.some(d => d.kind === 'audioinput');
+      hasCam = devices.some(d => d.kind === 'videoinput');
+    } catch (err) {
+      console.warn('[nine-call] could not enumerate devices, assuming both exist', err);
+      hasMic = true;
+      hasCam = true;
+    }
+    return { hasMic, hasCam };
+  }
+
   async _joinChannel(channelName, callType) {
     if (!window.AgoraRTC) {
       console.error('[nine-call] Agora SDK not loaded');
@@ -150,6 +172,21 @@ class CallManager {
     }
 
     console.log('[nine-call] joining channel', channelName);
+
+    const { hasMic, hasCam } = await this._checkDevices();
+
+    if (!hasMic) {
+      // A call with no mic and no camera isn't a call — bail before we
+      // ever touch Agora, with a message that actually explains why.
+      this.onCallError?.('No microphone found on this device. Connect a mic and try again.');
+      return;
+    }
+
+    const wantsVideo = callType !== 'audio';
+    const willPublishVideo = wantsVideo && hasCam;
+    if (wantsVideo && !hasCam) {
+      console.warn('[nine-call] no camera found — continuing as audio-only');
+    }
 
     try {
       const { token, appId, uid } = await this._getToken(channelName);
@@ -172,13 +209,33 @@ class CallManager {
 
       await this.client.join(appId, channelName, token, uid);
 
-      this.localAudioTrack = await window.AgoraRTC.createMicrophoneAudioTrack();
+      // Mic is required and already confirmed present above, but the OS
+      // can still refuse it (permission denied, in use elsewhere, etc.)
+      // — that's a real failure Agora needs to throw, so no fallback here.
+      try {
+        this.localAudioTrack = await window.AgoraRTC.createMicrophoneAudioTrack();
+      } catch (err) {
+        console.error('[nine-call] microphone track failed:', err);
+        throw new Error(
+          err.name === 'NotAllowedError' || /Permission/i.test(err.message || '')
+            ? 'Microphone permission was denied'
+            : 'Could not access your microphone: ' + (err.message || 'unknown error')
+        );
+      }
       const tracksToPublish = [this.localAudioTrack];
 
-      if (callType !== 'audio') {
-        this.localVideoTrack = await window.AgoraRTC.createCameraVideoTrack();
-        this.onLocalVideoTrack?.(this.localVideoTrack);
-        tracksToPublish.push(this.localVideoTrack);
+      if (willPublishVideo) {
+        try {
+          this.localVideoTrack = await window.AgoraRTC.createCameraVideoTrack();
+          this.onLocalVideoTrack?.(this.localVideoTrack);
+          tracksToPublish.push(this.localVideoTrack);
+        } catch (err) {
+          // Camera failed even though enumerateDevices saw one (permission
+          // denied, camera in use, etc). Don't kill the whole call — drop
+          // to audio-only instead, same as when no camera exists at all.
+          console.warn('[nine-call] camera track failed, continuing audio-only:', err);
+          this.onCallError?.('Camera unavailable — continuing with audio only.');
+        }
       }
 
       await this.client.publish(tracksToPublish);
@@ -187,7 +244,7 @@ class CallManager {
       this.onCallError?.(
         (err.name === 'NotAllowedError' || /Permission/i.test(err.message || ''))
           ? 'Camera/mic permission was denied'
-          : 'Could not join the call: ' + (err.message || 'unknown error')
+          : (err.message || 'Could not join the call')
       );
       this._cleanup();
     }
