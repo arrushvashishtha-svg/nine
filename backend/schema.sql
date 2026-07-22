@@ -66,3 +66,36 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages (sender_id, receiver_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver ON friend_requests (receiver_id, status);
+
+-- ---------------- GROUPS ----------------
+
+CREATE TABLE IF NOT EXISTS groups (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(64) NOT NULL,
+  avatar_url TEXT,
+  created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  is_admin BOOLEAN NOT NULL DEFAULT false,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (group_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS group_messages (
+  id SERIAL PRIMARY KEY,
+  group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT,
+  attachment_url TEXT,
+  attachment_type VARCHAR(20),
+  attachment_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT group_message_has_content CHECK (content IS NOT NULL OR attachment_url IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages (group_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members (user_id);
