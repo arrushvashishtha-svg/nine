@@ -6,6 +6,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { generateUniqueFriendId } = require('../utils/generateId');
+const { requireAuth } = require('../utils/authMiddleware');
 
 const router = express.Router();
 
@@ -94,6 +95,25 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Something went wrong logging you in' });
+  }
+});
+
+// GET /auth/me — verifies a saved token is still valid and returns the
+// current user. Used on page load to silently resume a session instead
+// of forcing a fresh username/password login every time.
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, friend_id, is_private, avatar_url FROM users WHERE id = $1',
+      [req.userId]
+    );
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Account no longer exists' });
+    }
+    res.json({ user: publicUser(rows[0]) });
+  } catch (err) {
+    console.error('Me error:', err);
+    res.status(500).json({ error: 'Could not verify session' });
   }
 });
 
