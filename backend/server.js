@@ -13,6 +13,7 @@ const friendsRoutes = require('./routes/friends');
 const { router: messagesRoutes } = require('./routes/messages');
 const callsRoutes = require('./routes/calls');
 const uploadsRoutes = require('./routes/uploads');
+const { router: groupsRoutes } = require('./routes/groups');
 const { initSocket } = require('./socket');
 
 const app = express();
@@ -36,6 +37,7 @@ app.use('/friends', friendsRoutes);
 app.use('/messages', messagesRoutes);
 app.use('/calls', callsRoutes);
 app.use('/uploads', uploadsRoutes);
+app.use('/groups', groupsRoutes);
 
 // ---- Socket.IO ----
 const io = new Server(server, {
