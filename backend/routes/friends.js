@@ -129,6 +129,33 @@ router.post('/requests/:requestId/accept', async (req, res) => {
     );
 
     await client.query('COMMIT');
+
+    // Tell the ORIGINAL SENDER live, with the accepter's info, so their
+    // friend list updates without needing a refresh. Before this, only
+    // the person clicking "Accept" got their own list updated locally —
+    // the other side never heard about it until their next page load.
+    const io = req.app.get('io');
+    if (io) {
+      const { onlineUsers, isOnline } = require('../socket');
+      const sockets = onlineUsers.get(request.sender_id);
+      if (sockets) {
+        const accepterInfo = await pool.query(
+          'SELECT id, username, friend_id, avatar_url FROM users WHERE id = $1',
+          [req.userId]
+        );
+        const accepter = accepterInfo.rows[0];
+        for (const sockId of sockets) {
+          io.to(sockId).emit('friend:accepted', {
+            id: accepter.id,
+            username: accepter.username,
+            friendId: accepter.friend_id,
+            avatarUrl: accepter.avatar_url,
+            online: isOnline ? isOnline(req.userId) : false,
+          });
+        }
+      }
+    }
+
     res.json({ accepted: true, friendUserId: request.sender_id });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -152,7 +179,9 @@ router.post('/requests/:requestId/decline', async (req, res) => {
   res.json({ declined: true });
 });
 
-// GET /friends — your accepted friends list
+// GET /friends — your accepted friends list. Includes live online status
+// computed server-side, so a page load/refresh shows correct presence
+// immediately instead of waiting for a socket 'presence' event.
 router.get('/', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT u.id, u.username, u.friend_id, u.avatar_url
@@ -162,7 +191,11 @@ router.get('/', async (req, res) => {
      ORDER BY u.username ASC`,
     [req.userId]
   );
-  res.json({ friends: rows });
+
+  const { isOnline } = require('../socket');
+  const friends = rows.map(f => ({ ...f, online: isOnline(f.id) }));
+
+  res.json({ friends });
 });
 
 module.exports = router;
