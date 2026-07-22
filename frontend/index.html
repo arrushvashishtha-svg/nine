@@ -29,6 +29,10 @@
     --font-mono:'JetBrains Mono', monospace;
   }
   *{box-sizing:border-box; margin:0; padding:0;}
+  @keyframes fadeSlideIn{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:translateY(0);} }
+  @keyframes modalPop{ from{ opacity:0; transform:scale(0.94);} to{ opacity:1; transform:scale(1);} }
+  @keyframes modalBgFade{ from{ opacity:0;} to{ opacity:1;} }
+  @keyframes toastPulse{ 0%{ box-shadow:0 0 0 0 rgba(242,161,84,0.35);} 100%{ box-shadow:0 0 0 8px rgba(242,161,84,0);} }
   body{
     background:var(--bg);
     color:var(--text);
@@ -407,8 +411,10 @@
     font-weight:600;
     color:var(--text-faint);
     border-bottom:2px solid transparent;
-    transition:color .15s ease;
+    transition:color .15s ease, border-color .2s ease;
+    cursor:pointer;
   }
+  .tab:hover{color:var(--text-dim);}
   .tab.active{color:var(--text); border-bottom-color:var(--accent);}
 
   .list{flex:1; overflow-y:auto;}
@@ -422,11 +428,14 @@
     padding:11px 18px;
     cursor:pointer;
     border-left:2px solid transparent;
-    transition:background .12s ease;
+    transition:background .15s ease, border-color .15s ease, transform .1s ease;
+    animation:fadeSlideIn 0.25s ease both;
   }
   .friend-item:hover{background:var(--panel-2);}
+  .friend-item:active{transform:scale(0.99);}
   .friend-item.selected{background:var(--panel-2); border-left-color:var(--accent);}
-  .friend-item .avatar{position:relative;}
+  .friend-item .avatar{position:relative; transition:transform .15s ease;}
+  .friend-item:hover .avatar{transform:scale(1.04);}
   .online-dot{
     position:absolute;
     bottom:-1px; right:-1px;
@@ -434,6 +443,7 @@
     border-radius:50%;
     background:var(--online);
     border:2px solid var(--panel);
+    animation:toastPulse 2s ease-in-out infinite;
   }
   .friend-meta{flex:1; min-width:0;}
   .friend-name{font-size:14px; font-weight:500;}
@@ -474,9 +484,98 @@
     font-weight:600;
     border:1px solid var(--border);
   }
+  .req-btn{transition:background .15s ease, border-color .15s ease, color .15s ease, transform .1s ease;}
+  .req-btn:active{transform:scale(0.97);}
   .req-btn.accept{background:var(--accent); color:#1a1206; border-color:var(--accent);}
+  .req-btn.accept:hover{filter:brightness(1.08);}
   .req-btn.decline{color:var(--text-dim);}
   .req-btn.decline:hover{border-color:var(--danger); color:var(--danger);}
+
+  /* Groups */
+  .new-group-btn{
+    margin:12px 18px;
+    padding:11px 0;
+    border-radius:10px;
+    border:1px dashed var(--border);
+    color:var(--accent);
+    font-weight:600;
+    font-size:13px;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .new-group-btn:hover{border-color:var(--accent-dim); background:var(--panel-2);}
+  .group-item{
+    display:flex;
+    align-items:center;
+    gap:11px;
+    padding:11px 18px;
+    cursor:pointer;
+    border-left:2px solid transparent;
+    transition:background .12s ease;
+  }
+  .group-item:hover{background:var(--panel-2);}
+  .group-item.selected{background:var(--panel-2); border-left-color:var(--accent);}
+  .group-avatar{
+    width:36px; height:36px;
+    border-radius:50%;
+    background:linear-gradient(135deg, #7de3c0, #4a9c85);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-display); font-weight:700; font-size:14px;
+    color:#0a1f18;
+    flex-shrink:0;
+  }
+  .group-meta{flex:1; min-width:0;}
+  .group-name{font-size:14px; font-weight:500;}
+  .group-sub{
+    font-size:12px;
+    color:var(--text-faint);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    margin-top:2px;
+  }
+  .picker-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 12px;
+    border-bottom:1px solid var(--border);
+    cursor:pointer;
+  }
+  .picker-row:last-child{border-bottom:none;}
+  .picker-row:hover{background:var(--panel-2);}
+  .picker-row input[type="checkbox"]{width:16px; height:16px; accent-color:var(--accent);}
+  .picker-row .friend-name{flex:1;}
+  .member-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 4px;
+    border-bottom:1px solid var(--border);
+  }
+  .member-row:last-child{border-bottom:none;}
+  .member-tag{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    color:var(--accent);
+    border:1px solid var(--accent-dim);
+    padding:2px 6px;
+    border-radius:6px;
+    margin-left:auto;
+  }
+  .member-remove{
+    color:var(--text-faint);
+    font-size:11px;
+    margin-left:8px;
+  }
+  .member-remove:hover{color:var(--danger);}
+
+  /* Modal entrance polish */
+  #new-group-modal, #group-info-modal, #incoming-call-modal, #active-call-overlay{
+    animation:modalBgFade 0.18s ease both;
+  }
+  #new-group-modal > div, #group-info-modal > div, #incoming-call-modal > div{
+    animation:modalPop 0.22s cubic-bezier(.34,1.2,.64,1) both;
+  }
 
   /* ---------- Chat pane ---------- */
   .chat-pane{
@@ -513,6 +612,7 @@
   .chat-header-name{font-family:var(--font-display); font-weight:600; font-size:15.5px;}
   .chat-header-status{font-size:11.5px; color:var(--text-faint); margin-top:1px;}
   .chat-header-status.online{color:var(--online);}
+  .chat-header-status.typing{color:var(--accent); font-style:italic;}
 
   .messages{
     flex:1;
@@ -525,7 +625,7 @@
   .messages::-webkit-scrollbar{width:6px;}
   .messages::-webkit-scrollbar-thumb{background:var(--border); border-radius:3px;}
 
-  .msg-row{display:flex;}
+  .msg-row{display:flex; animation:fadeSlideIn 0.22s ease both;}
   .msg-row.mine{justify-content:flex-end;}
   .bubble{
     max-width:60%;
@@ -533,6 +633,7 @@
     border-radius:14px;
     font-size:14px;
     line-height:1.45;
+    transition:filter .12s ease;
   }
   .msg-row.theirs .bubble{
     background:var(--panel);
@@ -827,11 +928,14 @@
 
       <div class="tabs">
         <div class="tab active" data-tab="friends">Friends</div>
+        <div class="tab" data-tab="groups">Groups</div>
         <div class="tab" data-tab="requests">Requests <span id="req-badge"></span></div>
       </div>
 
       <div class="list" id="friends-list"></div>
+      <div class="list" id="groups-list" style="display:none;"></div>
       <div class="list" id="requests-list" style="display:none;"></div>
+      <button class="new-group-btn" id="new-group-btn" style="display:none;">+ New group</button>
     </div>
 
     <div class="chat-pane" id="chat-pane">
@@ -851,6 +955,9 @@
             <div class="chat-header-status" id="chat-status">Offline</div>
           </div>
           <div style="margin-left:auto; display:flex; gap:8px;">
+            <button class="icon-btn" id="group-info-btn" title="Group info" style="display:none;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </button>
             <button class="icon-btn" id="call-audio-btn" title="Voice call">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
             </button>
@@ -889,6 +996,35 @@
     </div>
   </div>
 
+</div>
+
+<!-- New group modal -->
+<div id="new-group-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:26px; width:360px; max-width:90vw;">
+    <div style="font-family:var(--font-display); font-weight:600; font-size:17px; margin-bottom:16px;">New group</div>
+    <div class="field">
+      <label>Group name</label>
+      <input type="text" id="group-name-input" placeholder="e.g. weekend plans" maxlength="64">
+    </div>
+    <div class="field">
+      <label>Add friends</label>
+      <div id="group-friend-picker" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:10px;"></div>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:18px;">
+      <button class="req-btn decline" id="group-cancel-btn" style="flex:1; padding:11px 0;">Cancel</button>
+      <button class="req-btn accept" id="group-create-btn" style="flex:1; padding:11px 0;">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Group info / members modal -->
+<div id="group-info-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:26px; width:360px; max-width:90vw; max-height:80vh; overflow-y:auto;">
+    <div style="font-family:var(--font-display); font-weight:600; font-size:17px; margin-bottom:4px;" id="group-info-name">Group</div>
+    <div style="color:var(--text-faint); font-size:12px; margin-bottom:16px;" id="group-info-count">0 members</div>
+    <div id="group-info-members"></div>
+    <button class="req-btn decline" id="group-info-close-btn" style="width:100%; padding:11px 0; margin-top:16px;">Close</button>
+  </div>
 </div>
 
 <!-- Incoming call modal -->
@@ -963,6 +1099,15 @@
   document.getElementById('intro-screen').addEventListener('click', dismiss);
   // Auto-continue shortly after the animation finishes drawing
   setTimeout(dismiss, 3400);
+
+  // If we already have a saved session, skip straight past the intro —
+  // resumeSession() (defined further down) takes over from here.
+  if (localStorage.getItem('nine_token')) {
+    dismissed = true;
+    const intro = document.getElementById('intro-screen');
+    intro.style.display = 'none';
+    intro.classList.remove('active');
+  }
 })();
 
 // ---------- Config ----------
@@ -976,6 +1121,8 @@ let state = {
   friends: [],        // [{id, username, online, lastMsg, avatarUrl}]
   requests: [],        // [{id (request row id), userId, username, friendId, avatarUrl}]
   messages: {},        // {friendUserId: [{fromMe, text, time, attachment}]}
+  groups: [],          // [{id, name, avatarUrl, createdBy, members:[{id,username,friendId,avatarUrl,isAdmin}], lastMsg}]
+  groupMessages: {},    // {groupId: [{fromMe, fromUserId, fromUsername, text, time, attachment}]}
   token: localStorage.getItem('nine_token') || null,
 };
 
@@ -1070,6 +1217,47 @@ const api = {
     });
     return handleRes(res);
   },
+  async getGroups(){
+    const res = await fetch(`${API_BASE}/groups`, { headers: authHeaders() });
+    return handleRes(res);
+  },
+  async createGroup(name, memberIds){
+    const res = await fetch(`${API_BASE}/groups`, {
+      method:'POST', headers: authHeaders(), body: JSON.stringify({ name, memberIds })
+    });
+    return handleRes(res);
+  },
+  async getGroupHistory(groupId){
+    const res = await fetch(`${API_BASE}/groups/${groupId}/messages`, { headers: authHeaders() });
+    return handleRes(res);
+  },
+  async addGroupMember(groupId, userId){
+    const res = await fetch(`${API_BASE}/groups/${groupId}/members`, {
+      method:'POST', headers: authHeaders(), body: JSON.stringify({ userId })
+    });
+    return handleRes(res);
+  },
+  async removeGroupMember(groupId, userId){
+    const res = await fetch(`${API_BASE}/groups/${groupId}/members/${userId}`, {
+      method:'DELETE', headers: authHeaders()
+    });
+    return handleRes(res);
+  },
+  async setGroupAdmin(groupId, userId, isAdmin){
+    const res = await fetch(`${API_BASE}/groups/${groupId}/admins/${userId}`, {
+      method:'PATCH', headers: authHeaders(), body: JSON.stringify({ isAdmin })
+    });
+    return handleRes(res);
+  },
+  sendGroupMessage(groupId, text, attachment){
+    return new Promise((resolve, reject)=>{
+      if(!socket) return reject(new Error('Not connected'));
+      socket.emit('group:send_message', { groupId: Number(groupId), text, attachment }, (res)=>{
+        if(res?.error) reject(new Error(res.error));
+        else resolve(res.message);
+      });
+    });
+  },
   sendMessage(friendUserId, text, attachment){
     // Real-time send over the socket, not HTTP — see connectSocket()
     // IMPORTANT: toUserId must be a Number, not a string — the backend's
@@ -1106,8 +1294,21 @@ function connectSocket(){
     console.warn('[nine] socket disconnected:', reason);
   });
 
+  socket.on('typing:start', ({ fromUserId })=>{
+    clearTimeout(remoteTypingTimers[fromUserId]);
+    showTypingFor(fromUserId);
+    // Safety timeout in case a 'typing:stop' is ever dropped (tab closed
+    // mid-type, connection blip, etc.) — indicator clears itself after 5s.
+    remoteTypingTimers[fromUserId] = setTimeout(()=> clearTypingFor(fromUserId), 5000);
+  });
+
+  socket.on('typing:stop', ({ fromUserId })=>{
+    clearTypingFor(fromUserId);
+  });
+
   socket.on('receive_message', (msg)=>{
     const otherId = msg.sender_id === state.currentUser.id ? msg.receiver_id : msg.sender_id;
+    clearTypingFor(otherId);
     if(!state.messages[otherId]) state.messages[otherId] = [];
     const attachment = msg.attachment_url ? { url: msg.attachment_url, type: msg.attachment_type, name: msg.attachment_name } : null;
     state.messages[otherId].push({
@@ -1125,6 +1326,149 @@ function connectSocket(){
   socket.on('presence', ({ userId, online })=>{
     const f = state.friends.find(fr=>fr.id===String(userId));
     if(f){ f.online = online; renderFriends(); if(activeFriendId===String(userId)) updateChatHeaderStatus(f); }
+  });
+
+  // Belt-and-suspenders reconciliation: right after the socket connects
+  // (including on reconnect after a dropped connection), ask the server
+  // who's actually online right now and correct any stale local state.
+  // This is what fixes the bug where two people are both online but one
+  // side still shows the other as offline — a missed 'presence' event
+  // during a reconnect window no longer leaves permanently stale state.
+  socket.on('connect', () => {
+    socket.emit('get_online_friends', {}, (res) => {
+      if(!res || !res.online) return;
+      const onlineSet = new Set(res.online.map(String));
+      let changed = false;
+      state.friends.forEach(f => {
+        const shouldBeOnline = onlineSet.has(f.id);
+        if(f.online !== shouldBeOnline){ f.online = shouldBeOnline; changed = true; }
+      });
+      if(changed){
+        renderFriends();
+        if(activeFriendId){
+          const f = state.friends.find(fr=>fr.id===activeFriendId);
+          if(f) updateChatHeaderStatus(f);
+        }
+      }
+    });
+  });
+
+  // Fired on the ORIGINAL SENDER's side the moment the other person hits
+  // "Accept" — this is what makes new friends show up without a refresh.
+  socket.on('friend:accepted', (friend)=>{
+    if(state.friends.some(f=>f.id===String(friend.id))) return; // already have them
+    state.friends.push({
+      id: String(friend.id), username: friend.username, online: !!friend.online,
+      lastMsg: '', avatarUrl: friend.avatarUrl
+    });
+    state.messages[friend.id] = state.messages[friend.id] || [];
+    renderFriends();
+    toast(`You're now friends with ${friend.username}`);
+  });
+
+  socket.on('group:receive_message', (msg)=>{
+    const groupId = String(msg.group_id);
+    if(!state.groupMessages[groupId]) state.groupMessages[groupId] = [];
+    const attachment = msg.attachment_url ? { url: msg.attachment_url, type: msg.attachment_type, name: msg.attachment_name } : null;
+    const g = state.groups.find(gr=>gr.id===groupId);
+    const sender = g ? g.members.find(m=>m.id===msg.sender_id) : null;
+    const isMe = msg.sender_id === state.currentUser.id;
+    state.groupMessages[groupId].push({
+      fromMe: isMe,
+      fromUserId: msg.sender_id,
+      fromUsername: isMe ? state.currentUser.username : (sender ? sender.username : 'Unknown'),
+      text: msg.content,
+      time: new Date(msg.created_at).getTime(),
+      attachment
+    });
+    if(g) g.lastMsg = attachment ? attachmentPreviewLabel(attachment) : msg.content;
+    if(activeGroupId === groupId) renderGroupMessages();
+    renderGroups();
+  });
+
+  socket.on('group:typing:start', ({ groupId, fromUserId })=>{
+    if(String(groupId) !== activeGroupId) return;
+    const g = state.groups.find(gr=>gr.id===String(groupId));
+    const member = g ? g.members.find(m=>m.id===fromUserId) : null;
+    $('#chat-status').textContent = (member ? member.username : 'Someone') + ' is typing…';
+    $('#chat-status').classList.add('typing');
+    clearTimeout(remoteTypingTimers['g'+groupId+'-'+fromUserId]);
+    remoteTypingTimers['g'+groupId+'-'+fromUserId] = setTimeout(()=>{
+      if(String(groupId) === activeGroupId){
+        $('#chat-status').classList.remove('typing');
+        $('#chat-status').textContent = (g ? g.members.length : 0) + ' members';
+      }
+    }, 5000);
+  });
+
+  socket.on('group:typing:stop', ({ groupId })=>{
+    if(String(groupId) !== activeGroupId) return;
+    const g = state.groups.find(gr=>gr.id===String(groupId));
+    $('#chat-status').classList.remove('typing');
+    $('#chat-status').textContent = (g ? g.members.length : 0) + ' members';
+  });
+
+  // ---- Group membership pushed live from the backend ----
+  function mapGroupPayload(g){
+    return {
+      id: String(g.id), name: g.name, avatarUrl: g.avatar_url, createdBy: g.created_by,
+      members: g.members.map(m=>({ id:m.id, username:m.username, friendId:m.friend_id, avatarUrl:m.avatar_url, isAdmin:m.is_admin })),
+      lastMsg:''
+    };
+  }
+
+  socket.on('group:added', ({ group })=>{
+    if(state.groups.some(g=>g.id===String(group.id))) return;
+    state.groups.unshift(mapGroupPayload(group));
+    state.groupMessages[String(group.id)] = [];
+    renderGroups();
+    toast(`You were added to "${group.name}"`);
+  });
+
+  socket.on('group:updated', ({ group })=>{
+    const idx = state.groups.findIndex(g=>g.id===String(group.id));
+    if(idx === -1) return;
+    const updated = mapGroupPayload(group);
+    updated.lastMsg = state.groups[idx].lastMsg;
+    state.groups[idx] = updated;
+    renderGroups();
+    if(activeGroupId === String(group.id)) openGroupInfo();
+  });
+
+  socket.on('group:removed', ({ groupId })=>{
+    state.groups = state.groups.filter(g=>g.id!==String(groupId));
+    delete state.groupMessages[String(groupId)];
+    renderGroups();
+    if(activeGroupId === String(groupId)){
+      activeGroupId = null;
+      $('#chat-active').style.display = 'none';
+      $('#chat-empty').style.display = 'flex';
+    }
+    toast('You were removed from a group');
+  });
+
+  socket.on('group:member_left', ({ groupId, userId })=>{
+    const g = state.groups.find(gr=>gr.id===String(groupId));
+    if(!g) return;
+    g.members = g.members.filter(m=>m.id!==userId);
+    renderGroups();
+    if(activeGroupId === String(groupId) && $('#group-info-modal').style.display === 'flex') openGroupInfo();
+  });
+
+  socket.on('group:admin_changed', ({ groupId, userId, isAdmin })=>{
+    const g = state.groups.find(gr=>gr.id===String(groupId));
+    if(!g) return;
+    const m = g.members.find(mem=>mem.id===userId);
+    if(m) m.isAdmin = isAdmin;
+    if(activeGroupId === String(groupId) && $('#group-info-modal').style.display === 'flex') openGroupInfo();
+  });
+
+  socket.on('group:renamed', ({ groupId, name })=>{
+    const g = state.groups.find(gr=>gr.id===String(groupId));
+    if(!g) return;
+    g.name = name;
+    renderGroups();
+    if(activeGroupId === String(groupId)) $('#chat-name').textContent = name;
   });
 
   socket.on('friend_request', async (req)=>{
@@ -1239,13 +1583,52 @@ async function enterApp(){
   showScreen('main-screen');
   connectSocket();
   await loadFriendsAndRequests();
+  await loadGroups();
 }
+
+async function loadGroups(){
+  try{
+    const data = await api.getGroups();
+    state.groups = data.groups.map(g=>({
+      id: String(g.id), name: g.name, avatarUrl: g.avatar_url, createdBy: g.created_by,
+      members: g.members.map(m=>({ id:m.id, username:m.username, friendId:m.friend_id, avatarUrl:m.avatar_url, isAdmin:m.is_admin })),
+      lastMsg:''
+    }));
+    renderGroups();
+  }catch(err){
+    toast(err.message);
+  }
+}
+
+// ---------- Session resume (stay logged in across refreshes) ----------
+// Runs once on page load. If a token is saved, verify it against the
+// backend and jump straight into the app — no re-typing a password.
+// If it's missing/expired, fall back to the normal auth screen.
+async function resumeSession(){
+  if(!state.token) return;
+  try{
+    const res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
+    const data = await handleRes(res);
+    state.currentUser = {
+      id: data.user.id, username: data.user.username,
+      friendId: data.user.friendId, isPrivate: data.user.isPrivate,
+      avatarUrl: data.user.avatarUrl,
+    };
+    renderMe();
+    await enterApp();
+  }catch(err){
+    state.token = null;
+    localStorage.removeItem('nine_token');
+    showScreen('auth-screen');
+  }
+}
+resumeSession();
 
 async function loadFriendsAndRequests(){
   try{
     const [friendsData, requestsData] = await Promise.all([api.getFriends(), api.getRequests()]);
     state.friends = friendsData.friends.map(f=>({
-      id: String(f.id), username: f.username, online:false, lastMsg:'', avatarUrl: f.avatar_url
+      id: String(f.id), username: f.username, online: !!f.online, lastMsg:'', avatarUrl: f.avatar_url
     }));
     state.requests = requestsData.requests.map(r=>({
       id: r.id, userId: r.user_id, username: r.username, friendId: r.friend_id, avatarUrl: r.avatar_url
@@ -1300,6 +1683,10 @@ $('#logout-btn').addEventListener('click', ()=>{
   state.friends = [];
   state.requests = [];
   state.messages = {};
+  state.groups = [];
+  state.groupMessages = {};
+  activeFriendId = null;
+  activeGroupId = null;
   localStorage.removeItem('nine_token');
   $('#input-username').value = '';
   $('#input-password').value = '';
@@ -1313,7 +1700,9 @@ $$('.tab').forEach(tab=>{
     tab.classList.add('active');
     const which = tab.dataset.tab;
     $('#friends-list').style.display = which === 'friends' ? 'block' : 'none';
+    $('#groups-list').style.display = which === 'groups' ? 'block' : 'none';
     $('#requests-list').style.display = which === 'requests' ? 'block' : 'none';
+    $('#new-group-btn').style.display = which === 'groups' ? 'block' : 'none';
   });
 });
 
@@ -1393,6 +1782,176 @@ function renderRequests(){
   });
 }
 
+// ---------- Groups ----------
+let activeGroupId = null;
+
+function renderGroups(){
+  const list = $('#groups-list');
+  if(state.groups.length === 0){
+    list.innerHTML = `<div class="empty-list">No groups yet.<br>Create one from your friends list.</div>`;
+    return;
+  }
+  list.innerHTML = state.groups.map(g=>`
+    <div class="group-item ${g.id===activeGroupId?'selected':''}" data-id="${g.id}">
+      <div class="group-avatar">${initials(g.name)}</div>
+      <div class="group-meta">
+        <div class="group-name">${escapeHtml(g.name)}</div>
+        <div class="group-sub">${g.lastMsg ? escapeHtml(g.lastMsg) : g.members.length + ' members'}</div>
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('.group-item').forEach(el=>{
+    el.addEventListener('click', ()=> openGroupChat(el.dataset.id));
+  });
+}
+
+$('#new-group-btn').addEventListener('click', openNewGroupModal);
+$('#group-cancel-btn').addEventListener('click', ()=> $('#new-group-modal').style.display = 'none');
+
+function openNewGroupModal(){
+  $('#group-name-input').value = '';
+  const picker = $('#group-friend-picker');
+  if(state.friends.length === 0){
+    picker.innerHTML = `<div class="popover-empty">Add some friends first</div>`;
+  } else {
+    picker.innerHTML = state.friends.map(f=>`
+      <label class="picker-row">
+        <input type="checkbox" value="${f.id}">
+        <div class="avatar ${f.avatarUrl?'has-image':''}" style="width:28px;height:28px;font-size:12px;${f.avatarUrl?`background-image:url('${f.avatarUrl}')`:''}">${f.avatarUrl?'':initials(f.username)}</div>
+        <span class="friend-name">${escapeHtml(f.username)}</span>
+      </label>
+    `).join('');
+  }
+  $('#new-group-modal').style.display = 'flex';
+}
+
+$('#group-create-btn').addEventListener('click', async ()=>{
+  const name = $('#group-name-input').value.trim();
+  if(!name){ toast('Give your group a name'); return; }
+  const checked = Array.from($('#group-friend-picker').querySelectorAll('input[type="checkbox"]:checked'));
+  if(checked.length === 0){ toast('Pick at least one friend'); return; }
+  const memberIds = checked.map(c=>Number(c.value));
+  try{
+    const data = await api.createGroup(name, memberIds);
+    const g = data.group;
+    state.groups.unshift({
+      id: String(g.id), name: g.name, avatarUrl: g.avatar_url, createdBy: g.created_by,
+      members: g.members.map(m=>({ id:m.id, username:m.username, friendId:m.friend_id, avatarUrl:m.avatar_url, isAdmin:m.is_admin })),
+      lastMsg:''
+    });
+    renderGroups();
+    $('#new-group-modal').style.display = 'none';
+    toast(`"${g.name}" created`);
+    openGroupChat(String(g.id));
+  }catch(err){
+    toast(err.message);
+  }
+});
+
+async function openGroupChat(id){
+  if(typingActive && activeFriendId){
+    typingActive = false;
+    clearTimeout(typingStopTimer);
+    socket?.emit('typing:stop', { toUserId: Number(activeFriendId) });
+  }
+  activeFriendId = null;
+  activeGroupId = id;
+  const g = state.groups.find(gr=>gr.id===id);
+  if(!g) return;
+
+  $('#chat-empty').style.display = 'none';
+  $('#chat-active').style.display = 'flex';
+  $('#chat-avatar').classList.remove('has-image');
+  $('#chat-avatar').style.backgroundImage = '';
+  $('#chat-avatar').textContent = initials(g.name);
+  $('#chat-name').textContent = g.name;
+  $('#chat-status').textContent = g.members.length + ' members';
+  $('#chat-status').classList.remove('online','typing');
+  $('#call-audio-btn').style.display = 'none';
+  $('#call-video-btn').style.display = 'none';
+  $('#group-info-btn').style.display = 'inline-flex';
+
+  if(!state.groupMessages[id]){
+    try{
+      const data = await api.getGroupHistory(id);
+      state.groupMessages[id] = data.messages.map(m=>{
+        const sender = g.members.find(mem=>mem.id===m.sender_id);
+        return {
+          fromMe: m.sender_id === state.currentUser.id,
+          fromUserId: m.sender_id,
+          fromUsername: sender ? sender.username : 'Unknown',
+          text: m.content,
+          time: new Date(m.created_at).getTime(),
+          attachment: m.attachment_url ? { url: m.attachment_url, type: m.attachment_type, name: m.attachment_name } : null
+        };
+      });
+    }catch(err){
+      state.groupMessages[id] = [];
+      toast(err.message);
+    }
+  }
+  renderGroupMessages();
+  renderGroups();
+  document.body.classList.add('chat-open');
+}
+
+function renderGroupMessages(){
+  const box = $('#messages');
+  const msgs = state.groupMessages[activeGroupId] || [];
+  box.innerHTML = msgs.map(m=>`
+    <div class="msg-row ${m.fromMe?'mine':'theirs'}">
+      <div class="bubble">${!m.fromMe ? `<div style="font-size:11px; color:var(--accent); font-weight:600; margin-bottom:2px;">${escapeHtml(m.fromUsername)}</div>` : ''}${renderMessageContent(m)}<span class="time">${formatTime(m.time)}</span></div>
+    </div>
+  `).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+$('#group-info-close-btn').addEventListener('click', ()=> $('#group-info-modal').style.display = 'none');
+
+function openGroupInfo(){
+  const g = state.groups.find(gr=>gr.id===activeGroupId);
+  if(!g) return;
+  $('#group-info-name').textContent = g.name;
+  $('#group-info-count').textContent = g.members.length + ' members';
+  const myMembership = g.members.find(m=>m.id===state.currentUser.id);
+  const iAmAdmin = myMembership && myMembership.isAdmin;
+
+  $('#group-info-members').innerHTML = g.members.map(m=>`
+    <div class="member-row" data-user-id="${m.id}">
+      <div class="avatar ${m.avatarUrl?'has-image':''}" style="width:30px;height:30px;font-size:12px;${m.avatarUrl?`background-image:url('${m.avatarUrl}')`:''}">${m.avatarUrl?'':initials(m.username)}</div>
+      <span class="friend-name">${escapeHtml(m.username)}${m.id===state.currentUser.id?' (you)':''}</span>
+      ${m.isAdmin ? '<span class="member-tag">ADMIN</span>' : ''}
+      ${iAmAdmin && m.id!==state.currentUser.id ? `<button class="member-remove" data-action="remove">Remove</button>` : ''}
+      ${iAmAdmin && m.id!==state.currentUser.id && !m.isAdmin ? `<button class="member-remove" data-action="promote" style="color:var(--accent);">Make admin</button>` : ''}
+    </div>
+  `).join('');
+
+  $('#group-info-members').querySelectorAll('.member-remove').forEach(btn=>{
+    btn.addEventListener('click', async (e)=>{
+      const row = e.target.closest('.member-row');
+      const userId = Number(row.dataset.userId);
+      try{
+        if(btn.dataset.action === 'remove'){
+          await api.removeGroupMember(g.id, userId);
+          g.members = g.members.filter(m=>m.id!==userId);
+          toast('Member removed');
+        } else {
+          await api.setGroupAdmin(g.id, userId, true);
+          const m = g.members.find(m=>m.id===userId);
+          if(m) m.isAdmin = true;
+          toast('Promoted to admin');
+        }
+        openGroupInfo();
+        renderGroups();
+      }catch(err){
+        toast(err.message);
+      }
+    });
+  });
+
+  $('#group-info-modal').style.display = 'flex';
+}
+
 // ---------- Add friend by ID ----------
 $('#add-id-btn').addEventListener('click', sendRequestFromInput);
 $('#add-id-input').addEventListener('keydown', e=>{ if(e.key==='Enter') sendRequestFromInput(); });
@@ -1419,7 +1978,14 @@ async function sendRequestFromInput(){
 
 // ---------- Chat ----------
 async function openChat(id){
+  // Leaving whatever chat was open — stop any typing signal we'd sent there.
+  if(typingActive && activeFriendId){
+    typingActive = false;
+    clearTimeout(typingStopTimer);
+    socket?.emit('typing:stop', { toUserId: Number(activeFriendId) });
+  }
   activeFriendId = id;
+  activeGroupId = null;
   const f = state.friends.find(fr=>fr.id===id);
   if(!f) return;
 
@@ -1428,6 +1994,9 @@ async function openChat(id){
   applyAvatar($('#chat-avatar'), f.avatarUrl, f.username);
   $('#chat-name').textContent = f.username;
   updateChatHeaderStatus(f);
+  $('#call-audio-btn').style.display = 'flex';
+  $('#call-video-btn').style.display = 'flex';
+  $('#group-info-btn').style.display = 'none';
 
   if(!state.messages[id]){
     try{
@@ -1498,16 +2067,78 @@ function formatTime(ts){
   return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
 
+$('#group-info-btn').addEventListener('click', openGroupInfo);
+
 $('#send-btn').addEventListener('click', ()=>sendMsg());
 $('#msg-input').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMsg(); });
+
+// ---------- Typing indicators ----------
+let typingActive = false;
+let typingStopTimer = null;
+
+$('#msg-input').addEventListener('input', ()=>{
+  if((!activeFriendId && !activeGroupId) || !socket) return;
+  if(!typingActive){
+    typingActive = true;
+    if(activeGroupId) socket.emit('group:typing:start', { groupId: Number(activeGroupId) });
+    else socket.emit('typing:start', { toUserId: Number(activeFriendId) });
+  }
+  clearTimeout(typingStopTimer);
+  typingStopTimer = setTimeout(()=>{
+    typingActive = false;
+    if(activeGroupId) socket.emit('group:typing:stop', { groupId: Number(activeGroupId) });
+    else socket.emit('typing:stop', { toUserId: Number(activeFriendId) });
+  }, 2000);
+});
+
+const remoteTypingTimers = {}; // friendUserId -> timeout, auto-clears a stuck indicator
+
+function showTypingFor(friendUserId){
+  if(String(friendUserId) !== activeFriendId) return;
+  $('#chat-status').textContent = 'typing…';
+  $('#chat-status').classList.add('typing');
+}
+
+function clearTypingFor(friendUserId){
+  clearTimeout(remoteTypingTimers[friendUserId]);
+  if(String(friendUserId) !== activeFriendId) return;
+  $('#chat-status').classList.remove('typing');
+  const f = state.friends.find(fr=>fr.id===activeFriendId);
+  if(f) updateChatHeaderStatus(f);
+}
 
 async function sendMsg(attachment){
   const input = $('#msg-input');
   const text = input.value.trim();
   if(!text && !attachment) return;
-  if(!activeFriendId) return;
+  if(!activeFriendId && !activeGroupId) return;
   input.value = '';
   closeAllPopovers();
+
+  if(typingActive){
+    typingActive = false;
+    clearTimeout(typingStopTimer);
+    if(activeGroupId) socket?.emit('group:typing:stop', { groupId: Number(activeGroupId) });
+    else socket?.emit('typing:stop', { toUserId: Number(activeFriendId) });
+  }
+
+  if(activeGroupId){
+    try{
+      await api.sendGroupMessage(activeGroupId, text, attachment);
+      if(!state.groupMessages[activeGroupId]) state.groupMessages[activeGroupId] = [];
+      state.groupMessages[activeGroupId].push({
+        fromMe:true, fromUserId: state.currentUser.id, fromUsername: state.currentUser.username,
+        text, time:Date.now(), attachment
+      });
+      renderGroupMessages();
+      const g = state.groups.find(gr=>gr.id===activeGroupId);
+      if(g) g.lastMsg = (attachment ? attachmentPreviewLabel(attachment) : text);
+      renderGroups();
+    }catch(err){
+      toast(err.message);
+    }
+    return;
+  }
 
   try{
     await api.sendMessage(activeFriendId, text, attachment);
