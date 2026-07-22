@@ -1,23 +1,10 @@
-// Real-time layer: live chat messages, online presence, and
-// WebRTC signaling for voice/video calls.
-//
-// IMPORTANT ABOUT CALLING:
-// Socket.IO here only relays the *signaling* messages (offer/answer/
-// ICE candidates) between two browsers. The actual audio/video stream
-// travels peer-to-peer over WebRTC, NOT through this server. This file
-// does not send/receive any audio itself — your frontend needs to use
-// the browser's WebRTC APIs (RTCPeerConnection, getUserMedia) and use
-// these socket events to exchange connection info. See the frontend
-// call.js file for the browser side of this.
-//
-// For most home/office networks a direct peer-to-peer connection works
-// fine. Some networks (strict NATs, corporate firewalls) need a TURN
-// relay server to connect at all — see the note at the bottom of this
-// file about TURN servers.
+// Real-time layer: live chat messages, typing indicators, online
+// presence, group chat, and WebRTC/Agora call signaling.
 
 const jwt = require('jsonwebtoken');
 const pool = require('./db');
 const { areFriends } = require('./routes/messages');
+const { isGroupMember } = require('./routes/groups');
 
 // Track which socket(s) belong to which user id, so we can push events
 // to a specific person. A user can have multiple tabs/devices open,
@@ -37,7 +24,8 @@ function removeOnlineSocket(userId, socketId) {
 }
 
 function isOnline(userId) {
-  return onlineUsers.has(userId);
+  const set = onlineUsers.get(Number(userId));
+  return !!(set && set.size > 0);
 }
 
 function initSocket(io) {
@@ -59,10 +47,25 @@ function initSocket(io) {
     addOnlineSocket(userId, socket.id);
     broadcastPresence(io, userId, true);
 
-    // ---------------- CHAT MESSAGES ----------------
+    // Client can ask "who among my friends is online right now?" right
+    // after connecting, as a belt-and-suspenders alongside the
+    // GET /friends online flag — covers the case where the socket
+    // connects a moment before/after the initial friends fetch.
+    socket.on('get_online_friends', async (_, ack) => {
+      try {
+        const { rows } = await pool.query(
+          'SELECT friend_id AS other_user_id FROM friendships WHERE user_id = $1',
+          [userId]
+        );
+        const online = rows.map(r => r.other_user_id).filter(isOnline);
+        ack?.({ online });
+      } catch (err) {
+        ack?.({ online: [] });
+      }
+    });
 
-    // Client sends: socket.emit('send_message', { toUserId, text, attachment })
-    // attachment (optional): { url, type, name } from POST /uploads/attachment
+    // ---------------- CHAT MESSAGES (1:1) ----------------
+
     socket.on('send_message', async ({ toUserId, text, attachment }, ack) => {
       try {
         const hasText = text && text.trim();
@@ -74,7 +77,6 @@ function initSocket(io) {
           return ack?.({ error: 'Message too long' });
         }
 
-        // Never trust the client — re-check friendship server-side every time.
         const friends = await areFriends(userId, toUserId);
         if (!friends) {
           return ack?.({ error: 'You can only message friends' });
@@ -94,7 +96,6 @@ function initSocket(io) {
         );
         const message = rows[0];
 
-        // Deliver to every open tab/device the recipient has, if online
         const recipientSockets = onlineUsers.get(toUserId);
         if (recipientSockets) {
           for (const sockId of recipientSockets) {
@@ -102,7 +103,6 @@ function initSocket(io) {
           }
         }
 
-        // Also echo back to the sender's other open tabs/devices
         const senderSockets = onlineUsers.get(userId);
         if (senderSockets) {
           for (const sockId of senderSockets) {
@@ -117,15 +117,103 @@ function initSocket(io) {
       }
     });
 
-    // ---------------- FRIEND REQUEST PUSH ----------------
-    // server.js calls io.to(...).emit('friend_request', ...) directly
-    // from the HTTP route after a request is inserted — see server.js.
+    // ---------------- TYPING INDICATORS (1:1) ----------------
+    // Fire-and-forget, no ack needed. Client should debounce/throttle
+    // 'typing:start' on keystrokes and send 'typing:stop' on blur/send/
+    // after a pause — see frontend.
+
+    socket.on('typing:start', async ({ toUserId }) => {
+      if (!toUserId) return;
+      const friends = await areFriends(userId, toUserId).catch(() => false);
+      if (!friends) return;
+      relayToUser(io, toUserId, 'typing:start', { fromUserId: userId });
+    });
+
+    socket.on('typing:stop', async ({ toUserId }) => {
+      if (!toUserId) return;
+      relayToUser(io, toUserId, 'typing:stop', { fromUserId: userId });
+    });
+
+    // ---------------- GROUP CHAT ----------------
+
+    socket.on('group:send_message', async ({ groupId, text, attachment }, ack) => {
+      try {
+        const hasText = text && text.trim();
+        const hasAttachment = attachment && attachment.url;
+        if (!groupId || (!hasText && !hasAttachment)) {
+          return ack?.({ error: 'Missing message content' });
+        }
+        if (hasText && text.length > 4000) {
+          return ack?.({ error: 'Message too long' });
+        }
+
+        const { member } = await isGroupMember(groupId, userId);
+        if (!member) return ack?.({ error: 'You are not in this group' });
+
+        const { rows } = await pool.query(
+          `INSERT INTO group_messages (group_id, sender_id, content, attachment_url, attachment_type, attachment_name)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, group_id, sender_id, content, attachment_url, attachment_type, attachment_name, created_at`,
+          [
+            groupId, userId,
+            hasText ? text.trim() : null,
+            hasAttachment ? attachment.url : null,
+            hasAttachment ? attachment.type : null,
+            hasAttachment ? (attachment.name || null) : null,
+          ]
+        );
+        const message = rows[0];
+
+        const { rows: members } = await pool.query(
+          'SELECT user_id FROM group_members WHERE group_id = $1',
+          [groupId]
+        );
+        for (const m of members) {
+          const sockets = onlineUsers.get(m.user_id);
+          if (!sockets) continue;
+          for (const sockId of sockets) {
+            io.to(sockId).emit('group:receive_message', message);
+          }
+        }
+
+        ack?.({ message });
+      } catch (err) {
+        console.error('group:send_message error:', err);
+        ack?.({ error: 'Could not send message' });
+      }
+    });
+
+    socket.on('group:typing:start', async ({ groupId }) => {
+      if (!groupId) return;
+      const { member } = await isGroupMember(groupId, userId).catch(() => ({ member: false }));
+      if (!member) return;
+      const { rows: members } = await pool.query(
+        'SELECT user_id FROM group_members WHERE group_id = $1',
+        [groupId]
+      ).catch(() => ({ rows: [] }));
+      for (const m of members) {
+        if (m.user_id === userId) continue;
+        relayToUser(io, m.user_id, 'group:typing:start', { groupId, fromUserId: userId });
+      }
+    });
+
+    socket.on('group:typing:stop', async ({ groupId }) => {
+      if (!groupId) return;
+      const { rows: members } = await pool.query(
+        'SELECT user_id FROM group_members WHERE group_id = $1',
+        [groupId]
+      ).catch(() => ({ rows: [] }));
+      for (const m of members) {
+        if (m.user_id === userId) continue;
+        relayToUser(io, m.user_id, 'group:typing:stop', { groupId, fromUserId: userId });
+      }
+    });
+
+    // ---------------- FRIEND REQUEST / ACCEPT PUSH ----------------
+    // server.js / routes/friends.js call io.to(...).emit(...) directly
+    // from the HTTP routes after DB writes succeed.
 
     // ---------------- CALL SIGNALING (Agora) ----------------
-    // Agora's SDK handles the actual WebRTC connection, routing, and
-    // media entirely on their network. Socket.IO's only job here is to
-    // notify the other person "hey, join this channel" and to let either
-    // side cancel/decline/hang up before or during the call.
 
     socket.on('call:invite', async ({ toUserId, callType, channelName }) => {
       const friends = await areFriends(userId, toUserId).catch(() => false);
@@ -164,23 +252,36 @@ function initSocket(io) {
 }
 
 function relayToUser(io, toUserId, event, payload) {
-  const sockets = onlineUsers.get(toUserId);
+  const sockets = onlineUsers.get(Number(toUserId));
   if (!sockets) return;
   for (const sockId of sockets) {
     io.to(sockId).emit(event, payload);
   }
 }
 
-// Tell a user's friends when they come online/offline.
-// (Simple version: broadcast to everyone; fine for small apps. For scale,
-// look up the user's friend list and only notify those.)
+// Tell a user's friends AND group co-members when they come online/offline.
 async function broadcastPresence(io, userId, online) {
   try {
-    const { rows } = await pool.query(
+    const { rows: friendRows } = await pool.query(
       'SELECT friend_id AS other_user_id FROM friendships WHERE user_id = $1',
       [userId]
     );
-    for (const row of rows) {
+    const notified = new Set();
+    for (const row of friendRows) {
+      relayToUser(io, row.other_user_id, 'presence', { userId, online });
+      notified.add(row.other_user_id);
+    }
+
+    // Also notify group co-members who may not be direct friends
+    const { rows: groupmateRows } = await pool.query(
+      `SELECT DISTINCT gm2.user_id AS other_user_id
+       FROM group_members gm1
+       JOIN group_members gm2 ON gm2.group_id = gm1.group_id
+       WHERE gm1.user_id = $1 AND gm2.user_id != $1`,
+      [userId]
+    );
+    for (const row of groupmateRows) {
+      if (notified.has(row.other_user_id)) continue;
       relayToUser(io, row.other_user_id, 'presence', { userId, online });
     }
   } catch (err) {
@@ -188,4 +289,4 @@ async function broadcastPresence(io, userId, online) {
   }
 }
 
-module.exports = { initSocket, onlineUsers, relayToUser };
+module.exports = { initSocket, onlineUsers, relayToUser, isOnline };
