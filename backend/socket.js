@@ -1,5 +1,5 @@
 // Real-time layer: live chat messages, typing indicators, online
-// presence, group chat, and WebRTC/Agora call signaling.
+// presence, group chat, and raw WebRTC call signaling.
 
 const jwt = require('jsonwebtoken');
 const pool = require('./db');
@@ -213,14 +213,14 @@ function initSocket(io) {
     // server.js / routes/friends.js call io.to(...).emit(...) directly
     // from the HTTP routes after DB writes succeed.
 
-    // ---------------- CALL SIGNALING (Jitsi Meet) ----------------
-    // Jitsi's public server (meet.jit.si) handles the actual call —
-    // video, audio, and routing all happen on their infrastructure via
-    // the embedded iframe. Socket.IO's only job here is to notify the
-    // other person "hey, join this room" and to let either side
-    // cancel/decline/hang up before or during the call.
+    // ---------------- CALL SIGNALING (raw WebRTC) ----------------
+    // No third-party service involved — Socket.IO here only relays the
+    // signaling messages (offer/answer/ICE candidates) between two
+    // browsers so they can find each other. The actual audio/video
+    // travels directly peer-to-peer over WebRTC, never through this
+    // server. See the frontend call.js for the browser side of this.
 
-    socket.on('call:invite', async ({ toUserId, callType, roomName }) => {
+    socket.on('call:invite', async ({ toUserId, callType }) => {
       const friends = await areFriends(userId, toUserId).catch(() => false);
       if (!friends) return;
 
@@ -230,8 +230,12 @@ function initSocket(io) {
         return;
       }
       for (const sockId of targetSockets) {
-        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType, roomName });
+        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType });
       }
+    });
+
+    socket.on('call:signal', ({ toUserId, data }) => {
+      relayToUser(io, toUserId, 'call:signal', { fromUserId: userId, data });
     });
 
     socket.on('call:accept', ({ toUserId }) => {
