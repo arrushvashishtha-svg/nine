@@ -10,6 +10,16 @@
   wants to call whom over Socket.IO; the actual call never touches your
   server at all.
 
+  IMPORTANT — IFRAME PERMISSIONS:
+  JitsiMeetExternalAPI creates its own <iframe> internally, but does NOT
+  set the `allow` attribute needed for camera/mic access inside that
+  iframe by default. Without it, Safari (especially iPadOS) silently
+  blocks all media device access inside the iframe — no permission
+  prompt appears, mute/camera buttons do nothing, and prejoin can throw
+  a vague connection error because it can never acquire a device. This
+  file patches the iframe's `allow` attribute immediately after Jitsi
+  creates it (see _joinRoom below) to fix that.
+
   Flow:
   1. Caller and callee agree on a room name (deterministic: built from
      both user IDs sorted, so both sides compute the identical string
@@ -65,11 +75,6 @@ class CallManager {
   }
 
   _roomNameFor(otherUserId) {
-    // Deterministic, so both sides independently compute the identical
-    // room name without needing to pass it back and forth first. Jitsi
-    // room names are effectively public-by-guessable-name on the free
-    // server, so we add a random-ish per-pair suffix once and reuse it
-    // — still simple, no backend round trip needed.
     const ids = [this.myUserId, otherUserId].sort((a, b) => a - b);
     return `nine-app-${ids[0]}-${ids[1]}`;
   }
@@ -87,7 +92,6 @@ class CallManager {
     });
 
     this.socket.on('call:accepted', async () => {
-      // We're the caller; the other side accepted — join the room now.
       await this._joinRoom(this.pendingRoomName, this.pendingCallType);
     });
 
@@ -136,6 +140,24 @@ class CallManager {
   }
 
   // ---- Internals ----
+
+  // Grants the iframe permission to actually use the camera/mic. Without
+  // this, iOS/iPadOS Safari blocks all media device access inside the
+  // iframe with no visible error — buttons just silently fail, and the
+  // prejoin step can throw a vague connection error since it can never
+  // acquire a device to begin with.
+  _patchIframePermissions() {
+    if (!this.containerEl) return;
+    const iframe = this.containerEl.querySelector('iframe');
+    if (!iframe) {
+      console.warn('[nine-call] could not find Jitsi iframe to patch permissions');
+      return;
+    }
+    const allowValue = 'camera; microphone; display-capture; autoplay; clipboard-write; fullscreen';
+    iframe.setAttribute('allow', allowValue);
+    iframe.allow = allowValue;
+  }
+
   async _joinRoom(roomName, callType) {
     if (!roomName) {
       console.error('[nine-call] no room name to join');
@@ -156,7 +178,6 @@ class CallManager {
     console.log('[nine-call] joining room', roomName);
     this.onCallStarted?.();
 
-    // Give the UI a tick to show the call container before we mount into it
     await new Promise(r => setTimeout(r, 0));
 
     try {
@@ -182,6 +203,13 @@ class CallManager {
           SHOW_WATERMARK_FOR_GUESTS: false,
         },
       });
+
+      // The iframe only exists after the constructor runs — patch it
+      // immediately, and again shortly after in case Jitsi re-creates
+      // or re-attaches the iframe during its own init sequence.
+      this._patchIframePermissions();
+      setTimeout(() => this._patchIframePermissions(), 300);
+      setTimeout(() => this._patchIframePermissions(), 1000);
 
       this.jitsiApi.addEventListener('videoConferenceLeft', () => {
         this.hangUp();
