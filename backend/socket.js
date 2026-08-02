@@ -238,6 +238,17 @@ function initSocket(io) {
       relayToUser(io, toUserId, 'call:signal', { fromUserId: userId, data });
     });
 
+    // Ephemeral chat messages sent during an active call — not stored
+    // in the database, just relayed live like typing indicators. Kept
+    // separate from send_message/receive_message on purpose so call
+    // chat never mixes into permanent conversation history.
+    socket.on('call:chat', async ({ toUserId, text }) => {
+      if (!toUserId || !text || !text.trim()) return;
+      const friends = await areFriends(userId, toUserId).catch(() => false);
+      if (!friends) return;
+      relayToUser(io, toUserId, 'call:chat', { fromUserId: userId, text: text.trim().slice(0, 500) });
+    });
+
     socket.on('call:accept', ({ toUserId }) => {
       relayToUser(io, toUserId, 'call:accepted', { fromUserId: userId });
     });
