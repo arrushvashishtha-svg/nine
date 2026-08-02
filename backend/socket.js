@@ -213,9 +213,14 @@ function initSocket(io) {
     // server.js / routes/friends.js call io.to(...).emit(...) directly
     // from the HTTP routes after DB writes succeed.
 
-    // ---------------- CALL SIGNALING (Agora) ----------------
+    // ---------------- CALL SIGNALING (Jitsi Meet) ----------------
+    // Jitsi's public server (meet.jit.si) handles the actual call —
+    // video, audio, and routing all happen on their infrastructure via
+    // the embedded iframe. Socket.IO's only job here is to notify the
+    // other person "hey, join this room" and to let either side
+    // cancel/decline/hang up before or during the call.
 
-    socket.on('call:invite', async ({ toUserId, callType, channelName }) => {
+    socket.on('call:invite', async ({ toUserId, callType, roomName }) => {
       const friends = await areFriends(userId, toUserId).catch(() => false);
       if (!friends) return;
 
@@ -225,7 +230,7 @@ function initSocket(io) {
         return;
       }
       for (const sockId of targetSockets) {
-        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType, channelName });
+        io.to(sockId).emit('call:incoming', { fromUserId: userId, callType, roomName });
       }
     });
 
