@@ -74,9 +74,19 @@ class CallManager {
     this._bindSocketEvents();
   }
 
-  _roomNameFor(otherUserId) {
-    const ids = [this.myUserId, otherUserId].sort((a, b) => a - b);
-    return `nine-app-${ids[0]}-${ids[1]}`;
+  // A fresh, unpredictable room name every call — NOT deterministic from
+  // user IDs. meet.jit.si is a shared public server: a fixed name like
+  // "nine-app-6-12" can get permanently stuck in "members only"/lobby
+  // mode (by Jitsi's own moderation heuristics, or by anyone else who's
+  // ever used that exact name), which fails every future call to that
+  // room forever with "conference.connectionError.membersOnly". A random
+  // name per call means we never collide with a stuck room. The caller
+  // generates it and sends it to the callee over Socket.IO, so both
+  // sides still end up in the same room without needing to compute it
+  // independently.
+  _newRoomName() {
+    const rand = Math.random().toString(36).slice(2, 10);
+    return `nine-app-${this.myUserId}-${Date.now()}-${rand}`;
   }
 
   setContainer(containerEl) {
@@ -116,7 +126,7 @@ class CallManager {
     console.log('[nine-call] starting call to', toUserId, callType);
     this.remoteUserId = toUserId;
     this.pendingCallType = callType;
-    this.pendingRoomName = this._roomNameFor(toUserId);
+    this.pendingRoomName = this._newRoomName();
     this.socket.emit('call:invite', { toUserId, callType, roomName: this.pendingRoomName });
   }
 
@@ -193,6 +203,12 @@ class CallManager {
           startWithVideoMuted: callType === 'audio',
           prejoinPageEnabled: false,
           disableDeepLinking: true,
+          // Safety net alongside random room names: never let this
+          // room end up in lobby/members-only mode, which is what
+          // caused "conference.connectionError.membersOnly" before.
+          enableLobby: false,
+          hideLobbyButton: true,
+          requireDisplayName: false,
         },
         interfaceConfigOverwrite: {
           TOOLBAR_BUTTONS: [
