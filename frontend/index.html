@@ -9,7 +9,6 @@
 <script>window.NINE_API_BASE = 'https://nine-cjzd.onrender.com';</script>
 <script>window.NINE_GIPHY_KEY = ''; /* paste your free GIPHY API key here — see README */</script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
 <style>
   :root{
     --bg:#14151a;
@@ -1040,22 +1039,16 @@
   </div>
 </div>
 
-<!-- Active call overlay — Agora's track.play(element) renders video into
-     these container divs directly (not <video> tags) -->
+<!-- Active call overlay — Jitsi's IFrame API renders its entire call UI
+     (video tiles, mute, camera, leave button, etc.) inside this single
+     container div. No separate local/remote video elements needed. -->
 <div id="active-call-overlay" style="display:none; position:fixed; inset:0; background:#0a0a0d; z-index:200; flex-direction:column;">
-  <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
-    <div id="remote-video" style="width:100%; height:100%; background:#000;"></div>
-    <div id="local-video" style="position:absolute; bottom:20px; right:20px; width:140px; height:100px; border-radius:10px; border:2px solid var(--border); background:#000; overflow:hidden;"></div>
-    <div id="call-status-label" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono);"></div>
-  </div>
-  <div style="padding:20px; display:flex; justify-content:center;">
-    <button id="hangup-btn" style="background:var(--danger); color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.33a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
-    </button>
-  </div>
+  <div id="call-status-label" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono); z-index:2;"></div>
+  <div id="jitsi-call-container" style="flex:1; width:100%; height:100%;"></div>
 </div>
 
 <div class="toast" id="toast"></div>
+<script src="https://meet.jit.si/external_api.js"></script>
 <script src="call.js"></script>
 
 <script>
@@ -2285,9 +2278,10 @@ async function uploadAndSendAttachment(file){
 function wireCallUI(){
   const incomingModal = $('#incoming-call-modal');
   const activeOverlay = $('#active-call-overlay');
-  const remoteVideoEl = $('#remote-video');
-  const localVideoEl = $('#local-video');
+  const callContainer = $('#jitsi-call-container');
   const statusLabel = $('#call-status-label');
+
+  call.setContainer(callContainer);
 
   call.onIncomingCall = (fromUserId, callType) => {
     const f = state.friends.find(fr=>fr.id===String(fromUserId));
@@ -2309,18 +2303,16 @@ function wireCallUI(){
     call.declineCall();
   });
 
-  call.onLocalVideoTrack = (track) => {
-    track.play(localVideoEl);
-  };
-  call.onRemoteVideoTrack = (track) => {
-    track.play(remoteVideoEl);
-    statusLabel.textContent = 'Connected';
+  // Jitsi renders its entire UI (video tiles, mute, camera, its own
+  // leave/hangup button) inside the container itself once the room is
+  // joined — we just show the overlay and clear the status label.
+  call.onCallStarted = () => {
+    statusLabel.textContent = '';
   };
   call.onCallEnded = () => {
     activeOverlay.style.display = 'none';
     incomingModal.style.display = 'none';
-    remoteVideoEl.innerHTML = '';
-    localVideoEl.innerHTML = '';
+    callContainer.innerHTML = '';
   };
   call.onCallDeclined = () => {
     activeOverlay.style.display = 'none';
@@ -2334,8 +2326,6 @@ function wireCallUI(){
     activeOverlay.style.display = 'none';
     toast(message);
   };
-
-  $('#hangup-btn').addEventListener('click', ()=> call.hangUp());
 
   $('#call-audio-btn').addEventListener('click', async ()=>{
     if(!activeFriendId) return;
