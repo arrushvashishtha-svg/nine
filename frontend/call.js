@@ -1,30 +1,33 @@
 /*
-  call.js — voice/video calling using Agora.
+  call.js — voice/video calling using Jitsi Meet (free public server,
+  meet.jit.si).
 
   HOW THIS WORKS:
-  Agora's SDK handles the entire WebRTC layer for you — routing, media,
-  and their global network — so you don't manage peer connections or
-  ICE candidates directly. Instead, both participants join the same
-  named "channel" using a short-lived token from your backend.
+  Jitsi's IFrame API embeds a full call UI (video tiles, mute, camera
+  toggle, screen share, leave button — all of it) inside an iframe they
+  manage. There's no API key, no account, no backend token to fetch —
+  meet.jit.si is free and open. Your backend's only job is relaying who
+  wants to call whom over Socket.IO; the actual call never touches your
+  server at all.
 
   Flow:
-  1. Caller and callee agree on a channel name (deterministic: built
-     from both user IDs sorted, so both sides compute the same string)
-  2. Caller sends a ring ('call:invite') with that channel name via
-     Socket.IO
-  3. Callee accepts -> both sides ask the backend for a token
-     (POST /calls/token) and call Agora's join() with that token
-  4. Agora's SDK publishes local audio/video and delivers the other
-     person's stream via the 'user-published' event
+  1. Caller and callee agree on a room name (deterministic: built from
+     both user IDs sorted, so both sides compute the identical string
+     without needing to ask the backend for anything)
+  2. Caller sends a ring ('call:invite') with that room name via Socket.IO
+  3. Callee accepts -> both sides create a JitsiMeetExternalAPI instance
+     pointed at that room name
+  4. Jitsi's iframe renders the whole call UI inside the container
+     element you give it
 
-  Requires the Agora Web SDK loaded on the page:
-    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
+  Requires the Jitsi Meet external API script loaded on the page:
+    <script src="https://meet.jit.si/external_api.js"></script>
 
   USAGE (wire this up in your main app.js):
     const call = new CallManager(socket, API_BASE, state.token, myUserId);
+    call.setContainer(document.getElementById('call-container'));
     call.onIncomingCall = (fromUserId, callType) => { ...show incoming UI... };
-    call.onRemoteStream = (stream) => { remoteVideoEl.srcObject/attach... };
-    call.onLocalStream = (stream) => { localVideoEl attach... };
+    call.onCallStarted = () => { ...show call container, hide other UI... };
     call.onCallEnded = () => { ...hide call UI... };
 
     // to start a call:
@@ -44,17 +47,15 @@ class CallManager {
     this.apiBase = apiBase;
     this.authToken = authToken;
     this.myUserId = myUserId;
-    this.client = null;
-    this.localAudioTrack = null;
-    this.localVideoTrack = null;
+    this.jitsiApi = null;
+    this.containerEl = null;
     this.remoteUserId = null;
     this.pendingCallType = null;
-    this.pendingChannelName = null;
+    this.pendingRoomName = null;
 
     // Callbacks — set these from your UI code
     this.onIncomingCall = null;   // (fromUserId, callType) => {}
-    this.onRemoteVideoTrack = null; // (track) => {} — call track.play(el) yourself
-    this.onLocalVideoTrack = null;  // (track) => {}
+    this.onCallStarted = null;    // () => {} — call frame is about to render, show your call container
     this.onCallEnded = null;      // () => {}
     this.onCallDeclined = null;   // () => {}
     this.onCallUnavailable = null;// () => {} — friend is offline
@@ -63,24 +64,31 @@ class CallManager {
     this._bindSocketEvents();
   }
 
-  _channelNameFor(otherUserId) {
+  _roomNameFor(otherUserId) {
     // Deterministic, so both sides independently compute the identical
-    // channel name without needing to pass it back and forth first.
+    // room name without needing to pass it back and forth first. Jitsi
+    // room names are effectively public-by-guessable-name on the free
+    // server, so we add a random-ish per-pair suffix once and reuse it
+    // — still simple, no backend round trip needed.
     const ids = [this.myUserId, otherUserId].sort((a, b) => a - b);
-    return `nine-${ids[0]}-${ids[1]}`;
+    return `nine-app-${ids[0]}-${ids[1]}`;
+  }
+
+  setContainer(containerEl) {
+    this.containerEl = containerEl;
   }
 
   _bindSocketEvents() {
-    this.socket.on('call:incoming', ({ fromUserId, callType, channelName }) => {
+    this.socket.on('call:incoming', ({ fromUserId, callType, roomName }) => {
       this.remoteUserId = fromUserId;
       this.pendingCallType = callType;
-      this.pendingChannelName = channelName;
+      this.pendingRoomName = roomName;
       this.onIncomingCall?.(fromUserId, callType);
     });
 
     this.socket.on('call:accepted', async () => {
-      // We're the caller; the other side accepted — join the channel now.
-      await this._joinChannel(this.pendingChannelName, this.pendingCallType);
+      // We're the caller; the other side accepted — join the room now.
+      await this._joinRoom(this.pendingRoomName, this.pendingCallType);
     });
 
     this.socket.on('call:declined', () => {
@@ -104,14 +112,14 @@ class CallManager {
     console.log('[nine-call] starting call to', toUserId, callType);
     this.remoteUserId = toUserId;
     this.pendingCallType = callType;
-    this.pendingChannelName = this._channelNameFor(toUserId);
-    this.socket.emit('call:invite', { toUserId, callType, channelName: this.pendingChannelName });
+    this.pendingRoomName = this._roomNameFor(toUserId);
+    this.socket.emit('call:invite', { toUserId, callType, roomName: this.pendingRoomName });
   }
 
   // ---- Callee side ----
   async acceptCall() {
     this.socket.emit('call:accept', { toUserId: this.remoteUserId });
-    await this._joinChannel(this.pendingChannelName, this.pendingCallType);
+    await this._joinRoom(this.pendingRoomName, this.pendingCallType);
   }
 
   declineCall() {
@@ -128,151 +136,93 @@ class CallManager {
   }
 
   // ---- Internals ----
-  async _getToken(channelName) {
-    const res = await fetch(`${this.apiBase}/calls/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.authToken}`,
-      },
-      body: JSON.stringify({ channelName }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Could not get a call token');
-    return data;
-  }
-
-  // Checks what devices are actually available before we ask Agora to
-  // grab one. Browsers/OSes report "no device" in two different ways:
-  // either enumerateDevices() simply lists none, or the device exists
-  // but is blocked/busy and getUserMedia-style calls throw instead.
-  // We only trust enumerateDevices() here as a pre-check; Agora's own
-  // create*Track() calls are still wrapped in try/catch below as the
-  // final source of truth.
-  async _checkDevices() {
-    let hasMic = false;
-    let hasCam = false;
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      hasMic = devices.some(d => d.kind === 'audioinput');
-      hasCam = devices.some(d => d.kind === 'videoinput');
-    } catch (err) {
-      console.warn('[nine-call] could not enumerate devices, assuming both exist', err);
-      hasMic = true;
-      hasCam = true;
+  async _joinRoom(roomName, callType) {
+    if (!roomName) {
+      console.error('[nine-call] no room name to join');
+      this.onCallError?.('Could not join the call — missing room name');
+      return;
     }
-    return { hasMic, hasCam };
-  }
-
-  async _joinChannel(channelName, callType) {
-    if (!window.AgoraRTC) {
-      console.error('[nine-call] Agora SDK not loaded');
+    if (!window.JitsiMeetExternalAPI) {
+      console.error('[nine-call] Jitsi external API script not loaded');
       this.onCallError?.('Calling library did not load — check your connection and try again');
       return;
     }
-
-    console.log('[nine-call] joining channel', channelName);
-
-    const { hasMic, hasCam } = await this._checkDevices();
-
-    if (!hasMic) {
-      // A call with no mic and no camera isn't a call — bail before we
-      // ever touch Agora, with a message that actually explains why.
-      this.onCallError?.('No microphone found on this device. Connect a mic and try again.');
+    if (!this.containerEl) {
+      console.error('[nine-call] no container element set — call setContainer() first');
+      this.onCallError?.('Calling UI is not ready');
       return;
     }
 
-    const wantsVideo = callType !== 'audio';
-    const willPublishVideo = wantsVideo && hasCam;
-    if (wantsVideo && !hasCam) {
-      console.warn('[nine-call] no camera found — continuing as audio-only');
-    }
+    console.log('[nine-call] joining room', roomName);
+    this.onCallStarted?.();
+
+    // Give the UI a tick to show the call container before we mount into it
+    await new Promise(r => setTimeout(r, 0));
 
     try {
-      const { token, appId, uid } = await this._getToken(channelName);
-
-      this.client = window.AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-
-      this.client.on('user-published', async (user, mediaType) => {
-        await this.client.subscribe(user, mediaType);
-        if (mediaType === 'video') {
-          this.onRemoteVideoTrack?.(user.videoTrack);
-        }
-        if (mediaType === 'audio') {
-          user.audioTrack.play();
-        }
+      this.jitsiApi = new window.JitsiMeetExternalAPI('meet.jit.si', {
+        roomName,
+        parentNode: this.containerEl,
+        width: '100%',
+        height: '100%',
+        userInfo: {
+          displayName: `User ${this.myUserId}`,
+        },
+        configOverwrite: {
+          startWithVideoMuted: callType === 'audio',
+          prejoinPageEnabled: false,
+          disableDeepLinking: true,
+        },
+        interfaceConfigOverwrite: {
+          TOOLBAR_BUTTONS: [
+            'microphone', 'camera', 'desktop', 'fullscreen',
+            'hangup', 'chat', 'tileview',
+          ],
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+        },
       });
 
-      this.client.on('user-left', () => {
+      this.jitsiApi.addEventListener('videoConferenceLeft', () => {
         this.hangUp();
       });
 
-      await this.client.join(appId, channelName, token, uid);
+      this.jitsiApi.addEventListener('readyToClose', () => {
+        this.hangUp();
+      });
 
-      // Mic is required and already confirmed present above, but the OS
-      // can still refuse it (permission denied, in use elsewhere, etc.)
-      // — that's a real failure Agora needs to throw, so no fallback here.
-      try {
-        this.localAudioTrack = await window.AgoraRTC.createMicrophoneAudioTrack();
-      } catch (err) {
-        console.error('[nine-call] microphone track failed:', err);
-        throw new Error(
-          err.name === 'NotAllowedError' || /Permission/i.test(err.message || '')
-            ? 'Microphone permission was denied'
-            : 'Could not access your microphone: ' + (err.message || 'unknown error')
-        );
-      }
-      const tracksToPublish = [this.localAudioTrack];
-
-      if (willPublishVideo) {
-        try {
-          this.localVideoTrack = await window.AgoraRTC.createCameraVideoTrack();
-          this.onLocalVideoTrack?.(this.localVideoTrack);
-          tracksToPublish.push(this.localVideoTrack);
-        } catch (err) {
-          // Camera failed even though enumerateDevices saw one (permission
-          // denied, camera in use, etc). Don't kill the whole call — drop
-          // to audio-only instead, same as when no camera exists at all.
-          console.warn('[nine-call] camera track failed, continuing audio-only:', err);
-          this.onCallError?.('Camera unavailable — continuing with audio only.');
-        }
-      }
-
-      await this.client.publish(tracksToPublish);
+      this.jitsiApi.addEventListener('errorOccurred', (e) => {
+        console.error('[nine-call] Jitsi error:', e);
+        this.onCallError?.('Call connection error: ' + (e?.error?.message || 'unknown'));
+      });
     } catch (err) {
       console.error('[nine-call] join failed:', err);
-      this.onCallError?.(
-        (err.name === 'NotAllowedError' || /Permission/i.test(err.message || ''))
-          ? 'Camera/mic permission was denied'
-          : (err.message || 'Could not join the call')
-      );
+      this.onCallError?.('Could not join the call');
       this._cleanup();
     }
   }
 
   _cleanup() {
-    if (this.localAudioTrack) {
-      this.localAudioTrack.close();
-      this.localAudioTrack = null;
-    }
-    if (this.localVideoTrack) {
-      this.localVideoTrack.close();
-      this.localVideoTrack = null;
-    }
-    if (this.client) {
-      try { this.client.leave(); } catch (e) { /* already left */ }
-      this.client = null;
+    if (this.jitsiApi) {
+      try {
+        this.jitsiApi.dispose();
+      } catch (e) { /* already gone */ }
+      this.jitsiApi = null;
     }
     this.remoteUserId = null;
     this.pendingCallType = null;
-    this.pendingChannelName = null;
+    this.pendingRoomName = null;
   }
 }
 
 /*
-  ABOUT AGORA'S FREE TIER:
-  - No credit card required to sign up or use the free tier
-  - 10,000 free minutes per month, shared across all projects on the account
-  - If you outgrow this, Agora's pay-as-you-go rates kick in automatically
-    only once you exceed the free allowance
+  ABOUT MEET.JIT.SI (FREE PUBLIC SERVER):
+  - No account, no API key, no card, no per-minute limits
+  - Anyone who knows (or guesses) the room name can join it — fine for
+    a personal project between friends, since room names are derived
+    from both users' numeric IDs and not shown anywhere public
+  - If you ever want more control (custom branding, guaranteed
+    capacity, private rooms with passwords), self-hosting Jitsi or
+    using Jitsi as a Service (JaaS) are the upgrade paths — not needed
+    for this app right now
 */
