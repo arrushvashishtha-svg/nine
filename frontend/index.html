@@ -928,6 +928,10 @@
           <span id="privacy-label">Public — anyone can find you by username</span>
           <div class="switch" id="privacy-switch"></div>
         </div>
+        <div class="privacy-toggle" id="notif-toggle-row">
+          <span id="notif-label">Ring for calls even in background</span>
+          <div class="switch" id="notif-switch"></div>
+        </div>
       </div>
 
       <div class="search-add">
@@ -1057,10 +1061,22 @@
 <div id="active-call-overlay" style="display:none; position:fixed; inset:0; background:#0a0a0d; z-index:200; flex-direction:column;">
   <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
     <video id="remote-video" autoplay playsinline style="width:100%; height:100%; background:#000; object-fit:cover;"></video>
-    <video id="local-video" autoplay playsinline muted style="position:absolute; bottom:20px; right:20px; width:140px; height:100px; border-radius:10px; border:2px solid var(--border); background:#000; object-fit:cover;"></video>
+    <!-- Shown instead of remote-video during audio-only calls -->
+    <div id="audio-call-avatar-wrap" style="display:none; flex-direction:column; align-items:center; gap:16px;">
+      <div class="avatar" id="audio-call-avatar" style="width:140px; height:140px; font-size:48px;">?</div>
+      <div id="audio-call-name" style="color:var(--text); font-size:18px; font-weight:600; font-family:var(--font-display);"></div>
+    </div>
+    <!-- Local video is drawn to this canvas (filters applied) instead of
+         directly to a <video> element, so the same filtered feed is both
+         previewed here and sent to the other person. -->
+    <canvas id="local-video-canvas" style="position:absolute; bottom:20px; right:20px; width:140px; height:100px; border-radius:10px; border:2px solid var(--border); background:#000; object-fit:cover;"></canvas>
+    <video id="local-video" autoplay playsinline muted style="display:none;"></video>
     <div id="call-status-label" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono);"></div>
   </div>
   <div style="padding:20px; display:flex; justify-content:center; gap:14px; align-items:center;">
+    <button id="call-filter-toggle-btn" style="background:var(--panel-2); color:var(--text-dim); width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </button>
     <button id="call-chat-toggle-btn" style="background:var(--panel-2); color:var(--text-dim); width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; position:relative;">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       <span id="call-chat-badge" style="display:none; position:absolute; top:-2px; right:-2px; background:var(--accent); color:#1a1206; font-size:10px; font-weight:700; min-width:16px; height:16px; border-radius:8px; align-items:center; justify-content:center; padding:0 4px;"></span>
@@ -1070,9 +1086,15 @@
     </button>
   </div>
 
+  <!-- Filter picker panel -->
+  <div id="call-filter-panel" style="display:none; position:absolute; bottom:96px; left:20px; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:10px; box-shadow:0 12px 32px rgba(0,0,0,0.5); z-index:5;">
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;" id="call-filter-grid"></div>
+  </div>
+
   <!-- Floating in-call chat box -->
   <div id="call-chat-box" style="display:none; position:absolute; bottom:96px; right:20px; width:280px; max-width:calc(100vw - 40px); height:360px; max-height:50vh; background:var(--panel); border:1px solid var(--border); border-radius:14px; flex-direction:column; overflow:hidden; box-shadow:0 12px 32px rgba(0,0,0,0.5); z-index:5;">
     <div style="padding:12px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+
       <span style="font-size:13px; font-weight:600;">In-call chat</span>
       <button id="call-chat-close-btn" style="color:var(--text-faint); width:22px; height:22px; display:flex; align-items:center; justify-content:center;">✕</button>
     </div>
@@ -1091,7 +1113,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="call.js?v=5"></script>
+<script src="call.js?v=6"></script>
 
 <script>
 /* ============================================================
@@ -1711,6 +1733,115 @@ $('#privacy-switch').addEventListener('click', async ()=>{
   toast(state.currentUser.isPrivate ? 'Account set to private' : 'Account set to public');
 });
 
+// ---------- Ring for calls even when the tab is backgrounded ----------
+// This is a browser-platform feature, not tied to any account setting:
+// it uses the Notifications API (to show a system notification even
+// when Nine isn't the focused tab) plus an in-page audio ringtone that
+// keeps playing as long as this browser tab is alive somewhere — even
+// if the phone is locked or you're in a different app. It can't ring
+// if Safari/Chrome itself is fully closed/force-quit; that requires
+// native push notifications, which need a paid Apple/Google developer
+// account and isn't something a web app can do on its own.
+function renderNotifSwitch(){
+  const enabled = localStorage.getItem('nine_call_notifs') === 'true';
+  $('#notif-switch').classList.toggle('on', enabled);
+  $('#notif-label').textContent = enabled
+    ? 'Ringing for calls in background — on'
+    : 'Ring for calls even in background';
+}
+renderNotifSwitch();
+
+$('#notif-switch').addEventListener('click', async ()=>{
+  const currentlyOn = localStorage.getItem('nine_call_notifs') === 'true';
+  if(currentlyOn){
+    localStorage.setItem('nine_call_notifs', 'false');
+    renderNotifSwitch();
+    toast('Background call ringing turned off');
+    return;
+  }
+  if(!('Notification' in window)){
+    toast("This browser doesn't support notifications");
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if(permission === 'granted'){
+    localStorage.setItem('nine_call_notifs', 'true');
+    renderNotifSwitch();
+    toast("You'll now get a ring for calls, even in the background");
+  } else {
+    toast('Permission denied — check your browser/site settings to enable notifications');
+  }
+});
+
+// Generates a simple two-tone ringtone using the Web Audio API — no
+// external audio file needed, works fully offline, and loops until
+// stopped (call answered/declined/timed out).
+let ringAudioCtx = null;
+let ringIntervalId = null;
+function startRingtone(){
+  stopRingtone();
+  try{
+    ringAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(){
+      if(!ringAudioCtx) return;
+      const now = ringAudioCtx.currentTime;
+      [880, 660].forEach((freq, i)=>{
+        const osc = ringAudioCtx.createOscillator();
+        const gain = ringAudioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, now + i*0.28);
+        gain.gain.linearRampToValueAtTime(0.18, now + i*0.28 + 0.02);
+        gain.gain.linearRampToValueAtTime(0, now + i*0.28 + 0.24);
+        osc.connect(gain).connect(ringAudioCtx.destination);
+        osc.start(now + i*0.28);
+        osc.stop(now + i*0.28 + 0.26);
+      });
+    }
+    playTone();
+    ringIntervalId = setInterval(playTone, 1800);
+  }catch(err){
+    console.warn('[nine] ringtone failed to start:', err);
+  }
+}
+function stopRingtone(){
+  if(ringIntervalId){ clearInterval(ringIntervalId); ringIntervalId = null; }
+  if(ringAudioCtx){ try{ ringAudioCtx.close(); }catch(e){} ringAudioCtx = null; }
+}
+
+// Fires a system notification (works even if the tab isn't focused, as
+// long as the browser process is still running) and starts the
+// ringtone. Called from call.onIncomingCall — see wireCallUI.
+let activeCallNotification = null;
+function notifyIncomingCall(fromUserId, callType){
+  startRingtone();
+  const enabled = localStorage.getItem('nine_call_notifs') === 'true';
+  if(!enabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+  const f = state.friends.find(fr=>fr.id===String(fromUserId));
+  const name = f ? f.username : 'Someone';
+  try{
+    activeCallNotification = new Notification(`Incoming ${callType} call`, {
+      body: `${name} is calling you on Nine`,
+      icon: f && f.avatarUrl ? f.avatarUrl : undefined,
+      requireInteraction: true,
+      tag: 'nine-incoming-call',
+    });
+    activeCallNotification.onclick = () => {
+      window.focus();
+      activeCallNotification.close();
+    };
+  }catch(err){
+    console.warn('[nine] could not show notification:', err);
+  }
+}
+function clearCallNotification(){
+  stopRingtone();
+  if(activeCallNotification){
+    try{ activeCallNotification.close(); }catch(e){}
+    activeCallNotification = null;
+  }
+}
+
 $('#logout-btn').addEventListener('click', ()=>{
   if(socket) socket.disconnect();
   state.currentUser = null;
@@ -2322,7 +2453,74 @@ function wireCallUI(){
   const activeOverlay = $('#active-call-overlay');
   const remoteVideoEl = $('#remote-video');
   const localVideoEl = $('#local-video');
+  const localCanvas = $('#local-video-canvas');
+  const localCtx = localCanvas.getContext('2d');
   const statusLabel = $('#call-status-label');
+  const audioAvatarWrap = $('#audio-call-avatar-wrap');
+
+  // ---- Video filters ----
+  // CSS filter strings applied to the canvas context before each frame
+  // is drawn. Kept intentionally simple/fast (color adjustments, blur)
+  // rather than face-tracking overlays, so it runs smoothly on every
+  // device including older iPads.
+  const FILTERS = [
+    { id: 'none',      label: 'None',   emoji: '🚫', css: 'none' },
+    { id: 'bw',        label: 'B & W',  emoji: '⚪', css: 'grayscale(1) contrast(1.1)' },
+    { id: 'warm',      label: 'Warm',   emoji: '🌅', css: 'sepia(0.35) saturate(1.4) brightness(1.05)' },
+    { id: 'cool',      label: 'Cool',   emoji: '❄️', css: 'saturate(1.3) hue-rotate(150deg) brightness(1.02)' },
+    { id: 'vivid',     label: 'Vivid',  emoji: '🌈', css: 'saturate(1.8) contrast(1.15)' },
+    { id: 'soft',      label: 'Soft',   emoji: '✨', css: 'brightness(1.08) contrast(0.92) saturate(1.1) blur(0.6px)' },
+    { id: 'noir',      label: 'Noir',   emoji: '🎬', css: 'grayscale(1) contrast(1.4) brightness(0.9)' },
+    { id: 'blurbg',    label: 'Soft blur', emoji: '💫', css: 'blur(4px)' },
+  ];
+  let activeFilterId = 'none';
+  let canvasRafId = null;
+  let filteredStream = null;
+
+  const filterGrid = $('#call-filter-grid');
+  filterGrid.innerHTML = FILTERS.map(f => `
+    <button type="button" data-filter="${f.id}" class="call-filter-swatch" style="display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 6px; border-radius:10px; background:var(--panel-2); border:1.5px solid ${f.id==='none'?'var(--accent)':'transparent'}; min-width:58px;">
+      <span style="font-size:18px;">${f.emoji}</span>
+      <span style="font-size:10px; color:var(--text-dim);">${f.label}</span>
+    </button>
+  `).join('');
+
+  filterGrid.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.call-filter-swatch');
+    if(!btn) return;
+    activeFilterId = btn.dataset.filter;
+    filterGrid.querySelectorAll('.call-filter-swatch').forEach(el=>{
+      el.style.borderColor = el.dataset.filter === activeFilterId ? 'var(--accent)' : 'transparent';
+    });
+  });
+
+  $('#call-filter-toggle-btn').addEventListener('click', ()=>{
+    $('#call-filter-panel').style.display = $('#call-filter-panel').style.display === 'none' ? 'block' : 'none';
+    $('#call-chat-box').style.display = 'none';
+  });
+
+  // Continuously draws the local camera feed onto a canvas with the
+  // active filter applied. This canvas is what's shown for self-view
+  // AND (via captureStream) what's actually sent to the other person —
+  // so the filter is visible on both ends, not just your own screen.
+  function startCanvasLoop(){
+    function draw(){
+      if(localVideoEl.readyState >= 2 && localVideoEl.videoWidth){
+        if(localCanvas.width !== localVideoEl.videoWidth){
+          localCanvas.width = localVideoEl.videoWidth;
+          localCanvas.height = localVideoEl.videoHeight;
+        }
+        localCtx.filter = FILTERS.find(f=>f.id===activeFilterId)?.css || 'none';
+        localCtx.drawImage(localVideoEl, 0, 0, localCanvas.width, localCanvas.height);
+      }
+      canvasRafId = requestAnimationFrame(draw);
+    }
+    draw();
+  }
+  function stopCanvasLoop(){
+    if(canvasRafId) cancelAnimationFrame(canvasRafId);
+    canvasRafId = null;
+  }
 
   call.onIncomingCall = (fromUserId, callType) => {
     const f = state.friends.find(fr=>fr.id===String(fromUserId));
@@ -2330,6 +2528,7 @@ function wireCallUI(){
     $('#incoming-name').textContent = f ? f.username : 'Someone';
     $('#incoming-type').textContent = `Incoming ${callType} call…`;
     incomingModal.style.display = 'flex';
+    notifyIncomingCall(fromUserId, callType);
   };
 
   $('#incoming-accept-btn').addEventListener('click', async ()=>{
@@ -2337,40 +2536,92 @@ function wireCallUI(){
     activeOverlay.style.display = 'flex';
     statusLabel.textContent = 'Connecting…';
     callChatPartnerId = call.remoteUserId;
+    clearCallNotification();
     await call.acceptCall();
   });
 
   $('#incoming-decline-btn').addEventListener('click', ()=>{
     incomingModal.style.display = 'none';
+    clearCallNotification();
     call.declineCall();
   });
 
   call.onLocalStream = (stream) => {
+    const hasVideo = stream.getVideoTracks().length > 0;
     localVideoEl.srcObject = stream;
+
+    if(hasVideo){
+      localCanvas.style.display = 'block';
+      audioAvatarWrap.style.display = 'none';
+      $('#call-filter-toggle-btn').style.display = 'flex';
+      startCanvasLoop();
+
+      // Replace the outgoing video track with the filtered canvas
+      // output, so the other person sees the filter too — not just us.
+      localVideoEl.addEventListener('loadedmetadata', function onMeta(){
+        localVideoEl.removeEventListener('loadedmetadata', onMeta);
+        try{
+          filteredStream = localCanvas.captureStream(30);
+          const filteredTrack = filteredStream.getVideoTracks()[0];
+          call.replaceOutgoingVideoTrack?.(filteredTrack);
+        }catch(err){
+          console.warn('[nine-call] canvas captureStream not available, sending unfiltered video', err);
+        }
+      }, { once:true });
+    } else {
+      localCanvas.style.display = 'none';
+      $('#call-filter-toggle-btn').style.display = 'none';
+      // Audio-only call — show our own avatar isn't needed (we know who
+      // we are), but keep the audio track flowing as normal.
+    }
   };
   call.onRemoteStream = (stream) => {
     remoteVideoEl.srcObject = stream;
     statusLabel.textContent = 'Connected';
+
+    const hasVideo = stream.getVideoTracks().length > 0;
+    if(!hasVideo){
+      // Audio-only call: show the other person's profile picture
+      // centered instead of a black video box.
+      remoteVideoEl.style.display = 'none';
+      audioAvatarWrap.style.display = 'flex';
+      const f = state.friends.find(fr=>fr.id===callChatPartnerId);
+      applyAvatar($('#audio-call-avatar'), f ? f.avatarUrl : null, f ? f.username : '?');
+      $('#audio-call-name').textContent = f ? f.username : '';
+    } else {
+      remoteVideoEl.style.display = 'block';
+      audioAvatarWrap.style.display = 'none';
+    }
   };
   call.onCallEnded = () => {
     activeOverlay.style.display = 'none';
     incomingModal.style.display = 'none';
     remoteVideoEl.srcObject = null;
     localVideoEl.srcObject = null;
+    remoteVideoEl.style.display = 'block';
+    audioAvatarWrap.style.display = 'none';
+    stopCanvasLoop();
+    activeFilterId = 'none';
+    $('#call-filter-panel').style.display = 'none';
+    clearCallNotification();
     resetCallChat();
   };
   call.onCallDeclined = () => {
     activeOverlay.style.display = 'none';
+    stopCanvasLoop();
+    clearCallNotification();
     resetCallChat();
     toast('Call declined');
   };
   call.onCallUnavailable = () => {
     activeOverlay.style.display = 'none';
+    clearCallNotification();
     resetCallChat();
     toast('They are offline right now');
   };
   call.onCallError = (message) => {
     activeOverlay.style.display = 'none';
+    clearCallNotification();
     resetCallChat();
     toast(message);
   };
