@@ -825,12 +825,25 @@
   }
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 
-  @media (max-width:760px){
+  /* Phone/tablet layout: width-based breakpoint raised to 900px (iPad
+     portrait is ~768-820px and was previously getting the desktop
+     layout at the old 760px cutoff), PLUS a touch-capability query as
+     a backup. iPadOS 13+ deliberately reports itself as desktop Safari
+     in the user agent, so device sniffing isn't reliable — this
+     combination (width OR touch-primary) catches iPads in both
+     orientations without needing to detect the device by name at all. */
+  @media (max-width:900px), (pointer:coarse) and (max-width:1180px){
     .sidebar{width:100%; min-width:0;}
     .chat-pane{display:none;}
     body.chat-open .sidebar{display:none;}
     body.chat-open .chat-pane{display:flex;}
     .back-btn{display:flex !important;}
+    #call-chat-box{
+      width:calc(100vw - 24px) !important;
+      right:12px !important;
+      bottom:88px !important;
+      max-height:45vh !important;
+    }
   }
   .back-btn{
     display:none;
@@ -914,6 +927,10 @@
         <div class="privacy-toggle">
           <span id="privacy-label">Public — anyone can find you by username</span>
           <div class="switch" id="privacy-switch"></div>
+        </div>
+        <div class="privacy-toggle" id="notif-toggle-row">
+          <span id="notif-label">Ring for calls even in background</span>
+          <div class="switch" id="notif-switch"></div>
         </div>
       </div>
 
@@ -1039,17 +1056,64 @@
   </div>
 </div>
 
-<!-- Active call overlay — Jitsi's IFrame API renders its entire call UI
-     (video tiles, mute, camera, leave button, etc.) inside this single
-     container div. No separate local/remote video elements needed. -->
+<!-- Active call overlay — plain WebRTC renders directly into these
+     <video> elements via srcObject, no third-party iframe involved -->
 <div id="active-call-overlay" style="display:none; position:fixed; inset:0; background:#0a0a0d; z-index:200; flex-direction:column;">
-  <div id="call-status-label" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono); z-index:2;"></div>
-  <div id="jitsi-call-container" style="flex:1; width:100%; height:100%;"></div>
+  <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
+    <video id="remote-video" autoplay playsinline style="width:100%; height:100%; background:#000; object-fit:cover;"></video>
+    <!-- Shown instead of remote-video during audio-only calls -->
+    <div id="audio-call-avatar-wrap" style="display:none; flex-direction:column; align-items:center; gap:16px;">
+      <div class="avatar" id="audio-call-avatar" style="width:140px; height:140px; font-size:48px;">?</div>
+      <div id="audio-call-name" style="color:var(--text); font-size:18px; font-weight:600; font-family:var(--font-display);"></div>
+    </div>
+    <!-- Local video is drawn to this canvas (filters applied) instead of
+         directly to a <video> element, so the same filtered feed is both
+         previewed here and sent to the other person. -->
+    <canvas id="local-video-canvas" style="position:absolute; bottom:20px; right:20px; width:140px; height:100px; border-radius:10px; border:2px solid var(--border); background:#000; object-fit:cover;"></canvas>
+    <video id="local-video" autoplay playsinline muted style="display:none;"></video>
+    <div id="call-status-label" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px; font-family:var(--font-mono);"></div>
+  </div>
+  <div style="padding:20px; display:flex; justify-content:center; gap:14px; align-items:center;">
+    <button id="call-filter-toggle-btn" style="background:var(--panel-2); color:var(--text-dim); width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </button>
+    <button id="call-chat-toggle-btn" style="background:var(--panel-2); color:var(--text-dim); width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      <span id="call-chat-badge" style="display:none; position:absolute; top:-2px; right:-2px; background:var(--accent); color:#1a1206; font-size:10px; font-weight:700; min-width:16px; height:16px; border-radius:8px; align-items:center; justify-content:center; padding:0 4px;"></span>
+    </button>
+    <button id="hangup-btn" style="background:var(--danger); color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.33a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
+    </button>
+  </div>
+
+  <!-- Filter picker panel -->
+  <div id="call-filter-panel" style="display:none; position:absolute; bottom:96px; left:20px; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:10px; box-shadow:0 12px 32px rgba(0,0,0,0.5); z-index:5;">
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;" id="call-filter-grid"></div>
+  </div>
+
+  <!-- Floating in-call chat box -->
+  <div id="call-chat-box" style="display:none; position:absolute; bottom:96px; right:20px; width:280px; max-width:calc(100vw - 40px); height:360px; max-height:50vh; background:var(--panel); border:1px solid var(--border); border-radius:14px; flex-direction:column; overflow:hidden; box-shadow:0 12px 32px rgba(0,0,0,0.5); z-index:5;">
+    <div style="padding:12px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+
+      <span style="font-size:13px; font-weight:600;">In-call chat</span>
+      <button id="call-chat-close-btn" style="color:var(--text-faint); width:22px; height:22px; display:flex; align-items:center; justify-content:center;">✕</button>
+    </div>
+    <div id="call-chat-messages" style="flex:1; overflow-y:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px;"></div>
+    <div style="padding:10px; border-top:1px solid var(--border); display:flex; gap:6px; align-items:center; flex-shrink:0; position:relative;">
+      <button id="call-emoji-btn" type="button" style="color:var(--text-faint); width:28px; height:28px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:16px;">🙂</button>
+      <input id="call-chat-input" type="text" placeholder="Message…" maxlength="500" style="flex:1; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; color:var(--text); min-width:0;">
+      <button id="call-chat-send-btn" type="button" style="color:var(--accent); width:28px; height:28px; flex-shrink:0; display:flex; align-items:center; justify-content:center;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+      <div class="popover" id="call-emoji-popover" style="bottom:46px; right:6px; left:auto;">
+        <div class="popover-grid" id="call-emoji-grid"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://meet.jit.si/external_api.js"></script>
-<script src="call.js"></script>
+<script src="call.js?v=6"></script>
 
 <script>
 /* ============================================================
@@ -1669,6 +1733,115 @@ $('#privacy-switch').addEventListener('click', async ()=>{
   toast(state.currentUser.isPrivate ? 'Account set to private' : 'Account set to public');
 });
 
+// ---------- Ring for calls even when the tab is backgrounded ----------
+// This is a browser-platform feature, not tied to any account setting:
+// it uses the Notifications API (to show a system notification even
+// when Nine isn't the focused tab) plus an in-page audio ringtone that
+// keeps playing as long as this browser tab is alive somewhere — even
+// if the phone is locked or you're in a different app. It can't ring
+// if Safari/Chrome itself is fully closed/force-quit; that requires
+// native push notifications, which need a paid Apple/Google developer
+// account and isn't something a web app can do on its own.
+function renderNotifSwitch(){
+  const enabled = localStorage.getItem('nine_call_notifs') === 'true';
+  $('#notif-switch').classList.toggle('on', enabled);
+  $('#notif-label').textContent = enabled
+    ? 'Ringing for calls in background — on'
+    : 'Ring for calls even in background';
+}
+renderNotifSwitch();
+
+$('#notif-switch').addEventListener('click', async ()=>{
+  const currentlyOn = localStorage.getItem('nine_call_notifs') === 'true';
+  if(currentlyOn){
+    localStorage.setItem('nine_call_notifs', 'false');
+    renderNotifSwitch();
+    toast('Background call ringing turned off');
+    return;
+  }
+  if(!('Notification' in window)){
+    toast("This browser doesn't support notifications");
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if(permission === 'granted'){
+    localStorage.setItem('nine_call_notifs', 'true');
+    renderNotifSwitch();
+    toast("You'll now get a ring for calls, even in the background");
+  } else {
+    toast('Permission denied — check your browser/site settings to enable notifications');
+  }
+});
+
+// Generates a simple two-tone ringtone using the Web Audio API — no
+// external audio file needed, works fully offline, and loops until
+// stopped (call answered/declined/timed out).
+let ringAudioCtx = null;
+let ringIntervalId = null;
+function startRingtone(){
+  stopRingtone();
+  try{
+    ringAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(){
+      if(!ringAudioCtx) return;
+      const now = ringAudioCtx.currentTime;
+      [880, 660].forEach((freq, i)=>{
+        const osc = ringAudioCtx.createOscillator();
+        const gain = ringAudioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, now + i*0.28);
+        gain.gain.linearRampToValueAtTime(0.18, now + i*0.28 + 0.02);
+        gain.gain.linearRampToValueAtTime(0, now + i*0.28 + 0.24);
+        osc.connect(gain).connect(ringAudioCtx.destination);
+        osc.start(now + i*0.28);
+        osc.stop(now + i*0.28 + 0.26);
+      });
+    }
+    playTone();
+    ringIntervalId = setInterval(playTone, 1800);
+  }catch(err){
+    console.warn('[nine] ringtone failed to start:', err);
+  }
+}
+function stopRingtone(){
+  if(ringIntervalId){ clearInterval(ringIntervalId); ringIntervalId = null; }
+  if(ringAudioCtx){ try{ ringAudioCtx.close(); }catch(e){} ringAudioCtx = null; }
+}
+
+// Fires a system notification (works even if the tab isn't focused, as
+// long as the browser process is still running) and starts the
+// ringtone. Called from call.onIncomingCall — see wireCallUI.
+let activeCallNotification = null;
+function notifyIncomingCall(fromUserId, callType){
+  startRingtone();
+  const enabled = localStorage.getItem('nine_call_notifs') === 'true';
+  if(!enabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+  const f = state.friends.find(fr=>fr.id===String(fromUserId));
+  const name = f ? f.username : 'Someone';
+  try{
+    activeCallNotification = new Notification(`Incoming ${callType} call`, {
+      body: `${name} is calling you on Nine`,
+      icon: f && f.avatarUrl ? f.avatarUrl : undefined,
+      requireInteraction: true,
+      tag: 'nine-incoming-call',
+    });
+    activeCallNotification.onclick = () => {
+      window.focus();
+      activeCallNotification.close();
+    };
+  }catch(err){
+    console.warn('[nine] could not show notification:', err);
+  }
+}
+function clearCallNotification(){
+  stopRingtone();
+  if(activeCallNotification){
+    try{ activeCallNotification.close(); }catch(e){}
+    activeCallNotification = null;
+  }
+}
+
 $('#logout-btn').addEventListener('click', ()=>{
   if(socket) socket.disconnect();
   state.currentUser = null;
@@ -2278,10 +2451,76 @@ async function uploadAndSendAttachment(file){
 function wireCallUI(){
   const incomingModal = $('#incoming-call-modal');
   const activeOverlay = $('#active-call-overlay');
-  const callContainer = $('#jitsi-call-container');
+  const remoteVideoEl = $('#remote-video');
+  const localVideoEl = $('#local-video');
+  const localCanvas = $('#local-video-canvas');
+  const localCtx = localCanvas.getContext('2d');
   const statusLabel = $('#call-status-label');
+  const audioAvatarWrap = $('#audio-call-avatar-wrap');
 
-  call.setContainer(callContainer);
+  // ---- Video filters ----
+  // CSS filter strings applied to the canvas context before each frame
+  // is drawn. Kept intentionally simple/fast (color adjustments, blur)
+  // rather than face-tracking overlays, so it runs smoothly on every
+  // device including older iPads.
+  const FILTERS = [
+    { id: 'none',      label: 'None',   emoji: '🚫', css: 'none' },
+    { id: 'bw',        label: 'B & W',  emoji: '⚪', css: 'grayscale(1) contrast(1.1)' },
+    { id: 'warm',      label: 'Warm',   emoji: '🌅', css: 'sepia(0.35) saturate(1.4) brightness(1.05)' },
+    { id: 'cool',      label: 'Cool',   emoji: '❄️', css: 'saturate(1.3) hue-rotate(150deg) brightness(1.02)' },
+    { id: 'vivid',     label: 'Vivid',  emoji: '🌈', css: 'saturate(1.8) contrast(1.15)' },
+    { id: 'soft',      label: 'Soft',   emoji: '✨', css: 'brightness(1.08) contrast(0.92) saturate(1.1) blur(0.6px)' },
+    { id: 'noir',      label: 'Noir',   emoji: '🎬', css: 'grayscale(1) contrast(1.4) brightness(0.9)' },
+    { id: 'blurbg',    label: 'Soft blur', emoji: '💫', css: 'blur(4px)' },
+  ];
+  let activeFilterId = 'none';
+  let canvasRafId = null;
+  let filteredStream = null;
+
+  const filterGrid = $('#call-filter-grid');
+  filterGrid.innerHTML = FILTERS.map(f => `
+    <button type="button" data-filter="${f.id}" class="call-filter-swatch" style="display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 6px; border-radius:10px; background:var(--panel-2); border:1.5px solid ${f.id==='none'?'var(--accent)':'transparent'}; min-width:58px;">
+      <span style="font-size:18px;">${f.emoji}</span>
+      <span style="font-size:10px; color:var(--text-dim);">${f.label}</span>
+    </button>
+  `).join('');
+
+  filterGrid.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.call-filter-swatch');
+    if(!btn) return;
+    activeFilterId = btn.dataset.filter;
+    filterGrid.querySelectorAll('.call-filter-swatch').forEach(el=>{
+      el.style.borderColor = el.dataset.filter === activeFilterId ? 'var(--accent)' : 'transparent';
+    });
+  });
+
+  $('#call-filter-toggle-btn').addEventListener('click', ()=>{
+    $('#call-filter-panel').style.display = $('#call-filter-panel').style.display === 'none' ? 'block' : 'none';
+    $('#call-chat-box').style.display = 'none';
+  });
+
+  // Continuously draws the local camera feed onto a canvas with the
+  // active filter applied. This canvas is what's shown for self-view
+  // AND (via captureStream) what's actually sent to the other person —
+  // so the filter is visible on both ends, not just your own screen.
+  function startCanvasLoop(){
+    function draw(){
+      if(localVideoEl.readyState >= 2 && localVideoEl.videoWidth){
+        if(localCanvas.width !== localVideoEl.videoWidth){
+          localCanvas.width = localVideoEl.videoWidth;
+          localCanvas.height = localVideoEl.videoHeight;
+        }
+        localCtx.filter = FILTERS.find(f=>f.id===activeFilterId)?.css || 'none';
+        localCtx.drawImage(localVideoEl, 0, 0, localCanvas.width, localCanvas.height);
+      }
+      canvasRafId = requestAnimationFrame(draw);
+    }
+    draw();
+  }
+  function stopCanvasLoop(){
+    if(canvasRafId) cancelAnimationFrame(canvasRafId);
+    canvasRafId = null;
+  }
 
   call.onIncomingCall = (fromUserId, callType) => {
     const f = state.friends.find(fr=>fr.id===String(fromUserId));
@@ -2289,48 +2528,193 @@ function wireCallUI(){
     $('#incoming-name').textContent = f ? f.username : 'Someone';
     $('#incoming-type').textContent = `Incoming ${callType} call…`;
     incomingModal.style.display = 'flex';
+    notifyIncomingCall(fromUserId, callType);
   };
 
   $('#incoming-accept-btn').addEventListener('click', async ()=>{
     incomingModal.style.display = 'none';
     activeOverlay.style.display = 'flex';
     statusLabel.textContent = 'Connecting…';
+    callChatPartnerId = call.remoteUserId;
+    clearCallNotification();
     await call.acceptCall();
   });
 
   $('#incoming-decline-btn').addEventListener('click', ()=>{
     incomingModal.style.display = 'none';
+    clearCallNotification();
     call.declineCall();
   });
 
-  // Jitsi renders its entire UI (video tiles, mute, camera, its own
-  // leave/hangup button) inside the container itself once the room is
-  // joined — we just show the overlay and clear the status label.
-  call.onCallStarted = () => {
-    statusLabel.textContent = '';
+  call.onLocalStream = (stream) => {
+    const hasVideo = stream.getVideoTracks().length > 0;
+    localVideoEl.srcObject = stream;
+
+    if(hasVideo){
+      localCanvas.style.display = 'block';
+      audioAvatarWrap.style.display = 'none';
+      $('#call-filter-toggle-btn').style.display = 'flex';
+      startCanvasLoop();
+
+      // Replace the outgoing video track with the filtered canvas
+      // output, so the other person sees the filter too — not just us.
+      localVideoEl.addEventListener('loadedmetadata', function onMeta(){
+        localVideoEl.removeEventListener('loadedmetadata', onMeta);
+        try{
+          filteredStream = localCanvas.captureStream(30);
+          const filteredTrack = filteredStream.getVideoTracks()[0];
+          call.replaceOutgoingVideoTrack?.(filteredTrack);
+        }catch(err){
+          console.warn('[nine-call] canvas captureStream not available, sending unfiltered video', err);
+        }
+      }, { once:true });
+    } else {
+      localCanvas.style.display = 'none';
+      $('#call-filter-toggle-btn').style.display = 'none';
+      // Audio-only call — show our own avatar isn't needed (we know who
+      // we are), but keep the audio track flowing as normal.
+    }
+  };
+  call.onRemoteStream = (stream) => {
+    remoteVideoEl.srcObject = stream;
+    statusLabel.textContent = 'Connected';
+
+    const hasVideo = stream.getVideoTracks().length > 0;
+    if(!hasVideo){
+      // Audio-only call: show the other person's profile picture
+      // centered instead of a black video box.
+      remoteVideoEl.style.display = 'none';
+      audioAvatarWrap.style.display = 'flex';
+      const f = state.friends.find(fr=>fr.id===callChatPartnerId);
+      applyAvatar($('#audio-call-avatar'), f ? f.avatarUrl : null, f ? f.username : '?');
+      $('#audio-call-name').textContent = f ? f.username : '';
+    } else {
+      remoteVideoEl.style.display = 'block';
+      audioAvatarWrap.style.display = 'none';
+    }
   };
   call.onCallEnded = () => {
     activeOverlay.style.display = 'none';
     incomingModal.style.display = 'none';
-    callContainer.innerHTML = '';
+    remoteVideoEl.srcObject = null;
+    localVideoEl.srcObject = null;
+    remoteVideoEl.style.display = 'block';
+    audioAvatarWrap.style.display = 'none';
+    stopCanvasLoop();
+    activeFilterId = 'none';
+    $('#call-filter-panel').style.display = 'none';
+    clearCallNotification();
+    resetCallChat();
   };
   call.onCallDeclined = () => {
     activeOverlay.style.display = 'none';
+    stopCanvasLoop();
+    clearCallNotification();
+    resetCallChat();
     toast('Call declined');
   };
   call.onCallUnavailable = () => {
     activeOverlay.style.display = 'none';
+    clearCallNotification();
+    resetCallChat();
     toast('They are offline right now');
   };
   call.onCallError = (message) => {
     activeOverlay.style.display = 'none';
+    clearCallNotification();
+    resetCallChat();
     toast(message);
   };
+
+  $('#hangup-btn').addEventListener('click', ()=> call.hangUp());
+
+  // ---- In-call floating chat ----
+  const callChatBox = $('#call-chat-box');
+  const callChatMessages = $('#call-chat-messages');
+  const callChatInput = $('#call-chat-input');
+  const callChatBadge = $('#call-chat-badge');
+  let callChatUnread = 0;
+  let callChatPartnerId = null;
+
+  function setCallChatBadge(n){
+    callChatUnread = n;
+    if(n > 0){
+      callChatBadge.textContent = n > 9 ? '9+' : String(n);
+      callChatBadge.style.display = 'flex';
+    } else {
+      callChatBadge.style.display = 'none';
+    }
+  }
+
+  function appendCallChatMessage(text, fromMe){
+    const row = document.createElement('div');
+    row.style.cssText = `align-self:${fromMe?'flex-end':'flex-start'}; max-width:85%;`;
+    row.innerHTML = `<div style="background:${fromMe?'var(--accent)':'var(--panel-2)'}; color:${fromMe?'#1a1206':'var(--text)'}; padding:7px 10px; border-radius:10px; font-size:13px; line-height:1.4; word-break:break-word;">${escapeHtml(text)}</div>`;
+    callChatMessages.appendChild(row);
+    callChatMessages.scrollTop = callChatMessages.scrollHeight;
+  }
+
+  function resetCallChat(){
+    callChatMessages.innerHTML = '';
+    callChatBox.style.display = 'none';
+    setCallChatBadge(0);
+    callChatPartnerId = null;
+  }
+
+  $('#call-chat-toggle-btn').addEventListener('click', ()=>{
+    const opening = callChatBox.style.display === 'none';
+    callChatBox.style.display = opening ? 'flex' : 'none';
+    if(opening){
+      setCallChatBadge(0);
+      callChatInput.focus();
+    }
+  });
+  $('#call-chat-close-btn').addEventListener('click', ()=>{
+    callChatBox.style.display = 'none';
+  });
+
+  function sendCallChatMessage(){
+    const text = callChatInput.value.trim();
+    if(!text || !callChatPartnerId) return;
+    callChatInput.value = '';
+    socket.emit('call:chat', { toUserId: Number(callChatPartnerId), text });
+    appendCallChatMessage(text, true);
+  }
+  $('#call-chat-send-btn').addEventListener('click', sendCallChatMessage);
+  callChatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendCallChatMessage(); });
+
+  // Reuses the exact same emoji set as the main composer.
+  const callEmojiGrid = $('#call-emoji-grid');
+  callEmojiGrid.innerHTML = EMOJI_LIST.map(e=>`<button type="button">${e}</button>`).join('');
+  callEmojiGrid.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    callChatInput.value += btn.textContent;
+    callChatInput.focus();
+  });
+  $('#call-emoji-btn').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    $('#call-emoji-popover').classList.toggle('open');
+  });
+  document.addEventListener('click', (e)=>{
+    if(!e.target.closest('#call-emoji-popover') && !e.target.closest('#call-emoji-btn')){
+      $('#call-emoji-popover').classList.remove('open');
+    }
+  });
+
+  socket.on('call:chat', ({ fromUserId, text })=>{
+    if(activeOverlay.style.display !== 'flex') return; // not in a call, ignore stray events
+    appendCallChatMessage(text, false);
+    if(callChatBox.style.display === 'none'){
+      setCallChatBadge(callChatUnread + 1);
+    }
+  });
 
   $('#call-audio-btn').addEventListener('click', async ()=>{
     if(!activeFriendId) return;
     activeOverlay.style.display = 'flex';
     statusLabel.textContent = 'Calling…';
+    callChatPartnerId = activeFriendId;
     await call.startCall(Number(activeFriendId), 'audio');
   });
 
@@ -2338,6 +2722,7 @@ function wireCallUI(){
     if(!activeFriendId) return;
     activeOverlay.style.display = 'flex';
     statusLabel.textContent = 'Calling…';
+    callChatPartnerId = activeFriendId;
     await call.startCall(Number(activeFriendId), 'video');
   });
 }
